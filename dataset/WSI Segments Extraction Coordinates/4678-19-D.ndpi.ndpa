@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<annotations>
+	<ndpviewstate id="4">
+		<title>extracted-1</title>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>40,000000</lens>
+		<x>449136</x>
+		<y>2313221</y>
+		<z>0</z>
+		<showtitle>1</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="freehand" displayname="AnnotateRectangle" color="#00ff00">
+			<measuretype>0</measuretype>
+			<closed>1</closed>
+			<pointlist>
+				<point>
+					<x>240081</x>
+					<y>2196012</y>
+				</point>
+				<point>
+					<x>240081</x>
+					<y>2429766</y>
+				</point>
+				<point>
+					<x>657970</x>
+					<y>2429766</y>
+				</point>
+				<point>
+					<x>657970</x>
+					<y>2196012</y>
+				</point>
+			</pointlist>
+			<specialtype>rectangle</specialtype>
+			<specialtype>rectangle</specialtype>
+		</annotation>
+	</ndpviewstate>
+	<ndpviewstate id="7">
+		<title>extracted-2</title>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>40,000000</lens>
+		<x>-1261230</x>
+		<y>-7438030</y>
+		<z>0</z>
+		<showtitle>1</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="freehand" displayname="AnnotateRectangle" color="#00ff00">
+			<measuretype>0</measuretype>
+			<closed>1</closed>
+			<pointlist>
+				<point>
+					<x>-1470725</x>
+					<y>-7555016</y>
+				</point>
+				<point>
+					<x>-1470726</x>
+					<y>-7322807</y>
+				</point>
+				<point>
+					<x>-1053278</x>
+					<y>-7322806</y>
+				</point>
+				<point>
+					<x>-1053278</x>
+					<y>-7555016</y>
+				</point>
+			</pointlist>
+			<specialtype>rectangle</specialtype>
+			<specialtype>rectangle</specialtype>
+		</annotation>
+	</ndpviewstate>
+</annotations>
+

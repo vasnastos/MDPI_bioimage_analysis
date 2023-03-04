@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<annotations>
+	<ndpviewstate id="4">
+		<title>extracted-1</title>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>40,000000</lens>
+		<x>-3942093</x>
+		<y>-3690126</y>
+		<z>0</z>
+		<showtitle>1</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="freehand" displayname="AnnotateRectangle" color="#00ff00">
+			<measuretype>0</measuretype>
+			<closed>1</closed>
+			<pointlist>
+				<point>
+					<x>-4150485</x>
+					<y>-3806672</y>
+				</point>
+				<point>
+					<x>-4150485</x>
+					<y>-3573801</y>
+				</point>
+				<point>
+					<x>-3734361</x>
+					<y>-3573801</y>
+				</point>
+				<point>
+					<x>-3734361</x>
+					<y>-3806672</y>
+				</point>
+			</pointlist>
+			<specialtype>rectangle</specialtype>
+			<specialtype>rectangle</specialtype>
+		</annotation>
+	</ndpviewstate>
+	<ndpviewstate id="5">
+		<title>extracted-2</title>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>40,000000</lens>
+		<x>-3196288</x>
+		<y>-1382586</y>
+		<z>0</z>
+		<showtitle>1</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="freehand" displayname="AnnotateRectangle" color="#00ff00">
+			<measuretype>0</measuretype>
+			<closed>1</closed>
+			<pointlist>
+				<point>
+					<x>-3405342</x>
+					<y>-1499132</y>
+				</point>
+				<point>
+					<x>-3405343</x>
+					<y>-1266702</y>
+				</point>
+				<point>
+					<x>-2988998</x>
+					<y>-1266702</y>
+				</point>
+				<point>
+					<x>-2988997</x>
+					<y>-1499132</y>
+				</point>
+			</pointlist>
+			<specialtype>rectangle</specialtype>
+			<specialtype>rectangle</specialtype>
+		</annotation>
+	</ndpviewstate>
+	<ndpviewstate id="6">
+		<title>extracted-3</title>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>40,000000</lens>
+		<x>-3351756</x>
+		<y>-4015837</y>
+		<z>0</z>
+		<showtitle>1</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="freehand" displayname="AnnotateRectangle" color="#00ff00">
+			<measuretype>0</measuretype>
+			<closed>1</closed>
+			<pointlist>
+				<point>
+					<x>-3560810</x>
+					<y>-4132162</y>
+				</point>
+				<point>
+					<x>-3560810</x>
+					<y>-3900173</y>
+				</point>
+				<point>
+					<x>-3145126</x>
+					<y>-3900173</y>
+				</point>
+				<point>
+					<x>-3145126</x>
+					<y>-4132162</y>
+				</point>
+			</pointlist>
+			<specialtype>rectangle</specialtype>
+			<specialtype>rectangle</specialtype>
+		</annotation>
+	</ndpviewstate>
+</annotations>
+
