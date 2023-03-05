@@ -1,6 +1,0 @@
-1) https://towardsdatascience.com/simple-trick-to-train-an-ordinal-regression-with-any-classifier-6911183d2a3c
-
-2) https://analyticsindiamag.com/a-complete-tutorial-on-ordinal-regression-in-python/
-
-3) https://www.statsmodels.org/dev/examples/notebooks/generated/ordinal_regression.html#Probit-ordinal-regression:
-
