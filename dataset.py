@@ -6,6 +6,7 @@ from rich.console import Console
 from collections import Counter
 import numpy as np
 import optuna,pickle
+import math
 
 from im_parser import JSON_Parser
 
@@ -17,6 +18,25 @@ class Dataset:
     image_size=(64,64,3)
     batch_size=16
     
+    
+    @staticmethod
+    def entropy(data):
+        # Count occurrences of each value in the data
+        value_counts = {}
+        for value in data:
+            if value in value_counts:
+                value_counts[value] += 1
+            else:
+                value_counts[value] = 1
+        
+        # Calculate the probability of each value
+        probs = [count / len(data) for count in value_counts.values()]
+        
+        # Calculate the entropy using the formula
+        entropy = -sum([p * math.log2(p) for p in probs])
+        
+        return entropy
+
     @staticmethod
     def change_patches_path(new_path_to_patches):
         Dataset.path_to_patches=new_path_to_patches
@@ -88,11 +108,7 @@ class Dataset:
                 plt.imshow(tf.cast(images[i]/255, tf.float32))
                 plt.title(Dataset.class_names[labels[i]])
                 plt.axis('off')
-    
-    def statistics(self):
-        console=Console(record=True)
-        console.rule('[bold red]Biomadical images dataset descriptive analytics')
-    # TO BE FILLED
+
 
 class PatchDataset:
     def __init__(self, imageNum:int, annotData:list):
@@ -247,55 +263,3 @@ class PatchDataset:
                     plt.imshow(imgBW_filled[:, :, ::-1])
                     plt.xticks([]), plt.yticks([])
                     plt.show()
-
-
-class OptunaHandler:
-    study_case_results_path=os.path.join('','optuna')
-    study_results=dict()
-
-    @staticmethod
-    def flush():
-        OptunaHandler.results.clear()
-
-    @staticmethod
-    def add_result(combination,metric_name,metric_value):
-        if OptunaHandler.study_results.get(combination,None)==None:
-            OptunaHandler[combination]=dict()
-        OptunaHandler[combination][metric_name]=metric_value
-
-    def __init__(self,new_study_case):
-        self.study_id=new_study_case
-        self.study = None
-        self.trial = None
-        self.study_objective_dimensions=list()
-
-    def add_objective_dimension(self,param_name,direction):
-        self.study_objective_dimensions[(param_name,direction)]
-    
-    def set_callback(self,callback_function):
-        del self.study
-        del self.trial
-        if self.study_objective_dimensions==[]:
-            raise AttributeError("No objective dimension has been setted properly")
-
-        self.study=optuna.create_study(directions=[direction for _,direction in self.study_objective_dimensions],load_if_exists=True)
-        self.study.optimize(callback_function,n_trials=50)
-    
-    def export(self):
-        self.study.save_study_direction()
-        self.study.trials_dataframe().to_csv(os.path.join(OptunaHandler.study_case_results_path,f'{self.study_id}.csv'))
-
-    def export_best(self):
-        if not os.path.exists(os.path.join(OptunaHandler.study_case_results_path,self.study_id)):
-            os.mkdir(os.path.join(OptunaHandler.study_case_results_path,self.study_id))
-        
-        with open(os.path.join(OptunaHandler.study_case_results_path,self.study_id,'best_trial.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_trial, f)
-
-        # save the best parameters
-        with open(os.path.join(OptunaHandler.study_case_results_path,self.study_id,'best_params.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_params, f)
-
-        # save the best value of the objective function
-        with open(os.path.join(OptunaHandler.study_case_results_path,self.study_id,'best_value.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_value, f)

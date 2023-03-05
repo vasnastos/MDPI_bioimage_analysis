@@ -18,15 +18,18 @@ from sklearn.tree import DecisionTreeClassifier
 from matplotlib.image import imread
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
+from collections import defaultdict
 
 import tensorflow as tf
 import tensorflow_addons as tfa
+import pickle,oapackage,statistics,optuna
 
 
 from dataset import Dataset,PatchDataset
 from rich.console import Console
+from rich.table import Table
 from functools import reduce
-
+from elayers import AddLayer
 
 class Controller:
     freezing_layers = {
@@ -262,6 +265,37 @@ class ImageNet:
         )
         self.model = voting_clf.fit(xtrain,ytrain)
     
+    def custom_model(self,optimizer_name):
+        self.clear_session()
+        del self.model
+
+        self.model=tf.keras.Sequential(
+            layers=[
+                tf.keras.layers.Input(shape=Dataset.image_size,name='input_layer'),
+                ImageNet.augmentation_model(),
+                tf.keras.layers.Conv2D(filters=32,kernel_size=(1,1),strides=(1,1),padding='valid',kernel_regularizer=tf.keras.regularizers.l2(1e-2),name='conv1'),
+                tf.keras.layers.Activation(activation='relu',name='relu_1'),
+                tf.keras.layers.BatchNormalization(name='batch_norm_1'),
+                tf.keras.layers.MaxPool2D(pool_size=(2,2),padding='valid',name='max_pool_1'),
+
+                tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(1, 1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(1e-2), name='conv_2'),
+                tf.keras.layers.Activation(activation='relu', name='relu_2'),
+                tf.keras.layers.BatchNormalization(name='batch_norm_2'),
+                tf.keras.layers.MaxPool2D(pool_size=(2,2), padding='valid', name='max_pool_2'),
+                tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(1, 1), padding='same', kernel_regularizer=tf.keras.regularizers.l2(1e-2), name='conv_3'),
+                tf.keras.layers.Activation(activation='relu', name='relu_3'),
+                tf.keras.layers.BatchNormalization(name='batch_norm_3'),
+                tf.keras.layers.MaxPool2D(pool_size=(2,2), padding='valid', name='max_pool_3'),
+
+                AddLayer(),
+
+                tf.keras.layers.Flatten(name='flatten'),
+                tf.keras.layers.Dense(units=2048, activation='relu', name='dense_1'),
+                tf.keras.layers.Dense(units=self.dataset.num_classes, activation='softmax', name='softmax')
+            ],name='RCC_resnet'
+        )
+        self.model.compile(ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy',metrics=['accuracy', tfa.metrics.CohenKappa(num_classes=self.dataset.num_classes,sparse_labels=True), tfa.metrics.F1Score(num_classes=self.dataset.num_classes, average='micro')])
+
     # Optuna callback 
     def optuna_callback(self,trial):
         selective_fine_tuning_base_model = trial.suggest_categorical('selective_fine_tuning_base_model',['vgg16','vgg19','resnet50','resnet101'])
@@ -331,3 +365,85 @@ class ImageNet:
         plt.imshow(imread(os.path.join('','project_results','figures','history','ExpanderNet_feature_extraction.png')))
         plt.xticks([]), plt.yticks([])
         plt.show()
+
+    def statistics(self):
+        console=Console(record=True)
+        feature_stats=defaultdict(dict)
+        for column in self.bioimage_dataframe.columns.to_list():
+            data=self.bioimage_dataframe[column].to_list()
+            feature_stats[column]['mean']=statistics.mean(data)
+            feature_stats[column]['std']=statistics.stdev(data)
+            feature_stats[column]['median']=statistics.median(data)
+            feature_stats[column]['Skewness']=statistics.skew(data)
+            q1,q3=statistics.quantiles(data)
+            feature_stats[column]['iqr']=q3-q1
+            feature_stats[column]['kurtosis']=statistics.kurtosis(data)
+            feature_stats[column]['Entropy']=Dataset.entropy(data)
+            row=[column]
+            row.extend(feature_stats[column].values())
+            stats_table.add_row(",".join(row))
+
+        stats_table=Table(headers=['','Mean','Median','Std','IQR','Skewness','Kurtosis','Entropy'],header_style='bold')
+        console.rule('[bold red]Biomadical images dataset descriptive analytics')
+        console.print(stats_table)
+
+
+class OptunaModel:
+    study_case_results_path=os.path.join('','optuna')
+    study_results=dict()
+
+    @staticmethod
+    def flush():
+        OptunaModel.results.clear()
+
+    @staticmethod
+    def add_result(combination,metric_name,metric_value):
+        if OptunaModel.study_results.get(combination,None)==None:
+            OptunaModel[combination]=dict()
+        OptunaModel[combination][metric_name]=metric_value
+
+    def __init__(self,new_study_case):
+        self.study_id=new_study_case
+        self.study = None
+        self.trial = None
+        self.study_objective_dimensions=list()
+
+    def add_objective_dimension(self,param_name,direction):
+        self.study_objective_dimensions.append((param_name,direction))
+    
+    def set_callback(self,callback_function):
+        del self.study
+        del self.trial
+        if self.study_objective_dimensions==[]:
+            raise AttributeError("No objective dimension has been setted properly")
+
+        self.study=optuna.create_study(directions=[direction for _,direction in self.study_objective_dimensions],load_if_exists=True)
+        self.study.optimize(callback_function,n_trials=50)
+    
+    def export(self):
+        self.study.save_study_direction()
+        self.study.trials_dataframe().to_csv(os.path.join(OptunaModel.study_case_results_path,f'{self.study_id}.csv'))
+
+    def export_best(self):
+        if not os.path.exists(os.path.join(OptunaModel.study_case_results_path,self.study_id)):
+            os.mkdir(os.path.join(OptunaModel.study_case_results_path,self.study_id))
+        
+        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_trial.pkl'), 'wb') as f:
+            pickle.dump(self.study.best_trial, f)
+
+        # save the best parameters
+        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_params.pkl'), 'wb') as f:
+            pickle.dump(self.study.best_params, f)
+
+        # save the best value of the objective function
+        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_value.pkl'), 'wb') as f:
+            pickle.dump(self.study.best_value, f)
+    
+    def pareto_front(self):
+        metrics=[
+            'accuracy',
+            'f1-score',
+            'cohens_kappa'
+        ]
+
+        pareto_objects=oapackage.ParetoDoubleLong()
