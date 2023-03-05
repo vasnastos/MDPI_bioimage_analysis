@@ -15,6 +15,7 @@ from sklearn.ensemble import VotingClassifier
 from sklearn.impute import KNNImputer
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.decomposition import PCA
 from matplotlib.image import imread
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
@@ -89,7 +90,6 @@ class ImageNet:
         self.log=logging.getLogger(name=f'rcc_staging_logger')
         self.log.addHandler(sh)
         self.log.addHandler(fh)
-
         self.console=Console(record=True)
     
     def clear_session(self):
@@ -99,7 +99,7 @@ class ImageNet:
         del self.model
 
     # Feature extraction function
-    def extract_features(self, base_model_name, lb=0, ub=0, save=True, save_best=False):
+    def extract_features(self, base_model_name, lb=0, ub=0, save=False):
         self.pretrained_model_name = base_model_name
         bioimage_input, bioimage_label = self.dataset.load_image_dataset(split=False)
         self.feature_extraction_model(base_model_name, lb, ub)
@@ -130,18 +130,29 @@ class ImageNet:
         labels = np.hstack(labels)
 
         # Save extracted features and labels to CSV file
+        data=list()
+        # Save extracted features and labels to CSV file
         if save:
-            with open(os.path.join('', 'project_results', 'Features', f'ExpanderNet_{base_model_name}_{lb}_{ub}_feature_set_{datetime.now().strftime("%m%d%Y%H%M%S")}.csv'), 'w') as f:
-                columns = None
+            with open(os.path.join('', 'results', 'extracted_features', f'ImageNet_patches_{base_model_name}_{lb}_{ub}.csv'), 'w') as writer:
+                for i in range(feature_set.shape[1]):
+                    writer.write(f'F{i+1},')
+                writer.write('Fuhrman\n')
                 for i in range(feature_set.shape[0]):
+                    row=list()
                     for j in range(feature_set.shape[1]):
-                        if columns is None:
-                            columns = feature_set.shape[1]
-                        f.write(f'{feature_set[i][j]},')
-                    f.write(f'{labels[i]}\n')
-        
-        print(feature_set,end='\n\n')
-        print(labels)
+                        row.append(feature_set[i][j])
+                        writer.write(f'{feature_set[i][j]},')
+                    writer.write(f'{labels[i]}\n')
+                    row.append(labels[i])
+                    data.append(row)
+        else:
+            for i in range(feature_set.shape[0]):
+                row=list()
+                for j in range(feature_set.shape[1]):
+                    row.append(feature_set[i][j])
+                row.append(labels[i])
+                data.append(row)
+        self.bioimage_dataframe=pd.DataFrame(data,columns=[f'F{i+1}' for i in range(len(feature_set[0]))]+['Fuhrman'])
 
 
     # Models that potentially could be use in an experiment
@@ -164,7 +175,7 @@ class ImageNet:
         Returns: tf.keras.applications.Model
             based opn the user selection a model architecture  is returned in order be used from the bioimages data
         """
-        base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weighqts='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
+        base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
         base_model.trainable = True
         if selective_fine_tuning:
             for layer in base_model.layers[lb:ub]:
@@ -175,7 +186,7 @@ class ImageNet:
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
     
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
-        base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weighqts='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
+        base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
         base_model.trainable = True
         if selective_fine_tuning[0]:
             for layer in base_model.layers[selective_fine_tuning[1]:selective_fine_tuning[2]]:
@@ -192,27 +203,30 @@ class ImageNet:
         self.model.save(os.path.join('..','fine_tuned_models',f'fined_tuned_{base_model_name}.h5'))
 
 
-    def conventional_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_extraction="FFS",clf="ada"):
+    def conventional_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",clf="ada"):
         # 1. Scaling features
         scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
         
         # 2. Feature selection
-        lasso_pipeline = Pipeline([
-            ('scaler', scaler),
-            ('lasso', Lasso())
-        ])
+        if feature_selection=='lasso':
+            lasso_pipeline = Pipeline(
+            steps=[
+                ('scaler', scaler),
+                ('lasso', Lasso())
+            ],verbose=True)
 
-        param_grid={"lasso_alpha":[0.1,0.5,1.0,1.5,2.0,5.0]}
-        scorer=make_scorer(r2_score)
+            param_grid={"lasso__alpha":list(range(10,20))}
+            scorer=make_scorer(r2_score)
 
-        lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
-        lasso_grid.fit(xtrain,xtrain)
-        coefficients=lasso_grid.best_estimator_.coef_
-        feature_importance=np.abs(coefficients)
+            lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
+            lasso_grid.fit(xtrain,xtrain)
+            coefficients=lasso_grid.best_estimator_.coef_
+            feature_importance=np.abs(coefficients)
+            xtrain, xtest = pd.DataFrame(xtrain), pd.DataFrame(xtest)
+            xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+            xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
 
-        xtrain, xtest = pd.DataFrame(xtrain), pd.DataFrame(xtest)
-        xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-        xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+
 
         # 3. classification model
         del self.model
@@ -230,24 +244,26 @@ class ImageNet:
         
         self.model=self.model.fit(xtrain,ytrain)
     
-    def voting_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_extraction="FFS",voting='soft'):
+    def voting_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",voting='soft'):
         # 1. Scaling features
         scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
         
         # 2. Feature selection
-        lasso_pipeline = Pipeline([
-            ('scaler', scaler),
-            ('lasso', Lasso())
-        ])
-        param_grid={"lasso_alpha":[0.1,0.5,1.0,1.5,2.0,5.0]}
-        scorer=make_scorer(r2_score)
-        lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
-        lasso_grid.fit(xtrain,xtrain)
-        coefficients=lasso_grid.best_estimator_.coef_
-        feature_importance=np.abs(coefficients)
-        xtrain, xtest = pd.DataFrame(xtrain), pd.DataFrame(xtest)
-        xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-        xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+        if feature_selection=='lasso':
+            lasso_pipeline = Pipeline(
+                steps=[
+                    ('scaler', scaler),
+                    ('lasso', Lasso(max_iter=100000))
+                ],verbose=True
+            )
+            param_grid={"lasso__alpha":[0.1,0.5,1.0,1.5,2.0,4.0,5.0]}
+            scorer=make_scorer(r2_score)
+            lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
+            lasso_grid.fit(xtrain,xtrain)
+            coefficients=lasso_grid.best_estimator_.coef_
+            feature_importance=np.abs(coefficients)
+            xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+            xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
         
         del self.model
         voting_clf = VotingClassifier(
@@ -300,14 +316,19 @@ class ImageNet:
     def optuna_callback(self,trial):
         selective_fine_tuning_base_model = trial.suggest_categorical('selective_fine_tuning_base_model',['vgg16','vgg19','resnet50','resnet101'])
         selective_fine_tuning_ub = trial.suggest_categorical('selective fine tuning',['0','1','2'])
-        optimizer=trial.suggest_categorical('optimizer',['adam','sgd'])
         scaling = trial.suggest_categorical('scaling',['MinMax','Standardization','KnnImputer'])
         classifier = trial.suggest_categorical('classifier',Controller.classifiers)
         if classifier=='vt':
             voting_system=trial.suggest_categorical('voting',['soft','hard'])
         self.clear_session()
 
-        feature_map,label_map=self.dataset.load_image_dataset(split=False)
+        self.extract_features(selective_fine_tuning_base_model,ub=selective_fine_tuning_ub,save=False)
+
+        feature_names=self.bioimage_dataframe.columns.to_list()
+        target_name=feature_names[-1]
+        feature_names.remove(target_name)
+
+        feature_map,label_map=self.bioimage_dataframe[feature_names],self.bioimage_dataframe[target_name]
         scores = dict(accuracy=list(),recall=list(),precision=list(),f1_score=list(),cohens_kappa=list())
         cv_model = StratifiedKFold(n_splits=10,random_state=1234,shuffle=True)
         for train_indeces,test_indeces in cv_model.split(feature_map,label_map):
@@ -319,6 +340,7 @@ class ImageNet:
                 self.voting_model(xtrain,xtest,ytrain,scaling=scaling,voting=voting_system)
             else:
                 self.conventional_model(xtrain,xtest,ytrain,scaling=scaling,clf=classifier)
+            
             ytest=np.array(ytest)
             predictions = np.array(self.model.predict(xtest))
 
@@ -336,6 +358,7 @@ class ImageNet:
             self.console(f'[bold red]:right arrow: [bold green]Cohens Kappa:{ck}')
             print(end='\n\n')
     
+    # -->Fit ImageNet model in to a dataset
     def fit(self,xtrain,ytrain):
         self.log.debug(self.model)
         if not hasattr(self.model,"fit"):
@@ -353,11 +376,12 @@ class ImageNet:
         else:
             self.model.fit(xtrain,ytrain) 
 
-    def predict(self,xset):
+    def predict(self,xtest):
         if not hasattr(self.model,"predict"):
             raise AttributeError(f"No method predict in {type(self.model)}")
-        return self.model.predict(xset)
+        return self.model.predict(xtest)
 
+    # Statistical representation of the data and model summary
     def graph(self):
         plt.figure(figsize=(15,8))
         plt.title(f"Transfer model - {self.base_model_name} - Architecture Diagram")
@@ -367,7 +391,6 @@ class ImageNet:
         plt.show()
 
     def statistics(self):
-        console=Console(record=True)
         stats_table=Table(headers=['','Mean','Median','Std','IQR','Skewness','Kurtosis','Entropy'],header_style='bold')
         feature_stats=defaultdict(dict)
         for column in self.bioimage_dataframe.columns.to_list():
@@ -382,10 +405,10 @@ class ImageNet:
             feature_stats[column]['Entropy']=Dataset.entropy(data)
             row=[column]
             row.extend(feature_stats[column].values())
-            stats_table.add_row(",".join(row))
+            stats_table.add_row(",".join(row),style='green')
 
-        console.rule('[bold red]Biomadical images dataset descriptive analytics')
-        console.print(stats_table)
+        self.console.rule('[bold red]Biomadical images dataset descriptive analytics')
+        self.console.print(stats_table)
 
 
 class OptunaModel:
