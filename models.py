@@ -368,6 +368,7 @@ class ImageNet:
 
     def statistics(self):
         console=Console(record=True)
+        stats_table=Table(headers=['','Mean','Median','Std','IQR','Skewness','Kurtosis','Entropy'],header_style='bold')
         feature_stats=defaultdict(dict)
         for column in self.bioimage_dataframe.columns.to_list():
             data=self.bioimage_dataframe[column].to_list()
@@ -383,7 +384,6 @@ class ImageNet:
             row.extend(feature_stats[column].values())
             stats_table.add_row(",".join(row))
 
-        stats_table=Table(headers=['','Mean','Median','Std','IQR','Skewness','Kurtosis','Entropy'],header_style='bold')
         console.rule('[bold red]Biomadical images dataset descriptive analytics')
         console.print(stats_table)
 
