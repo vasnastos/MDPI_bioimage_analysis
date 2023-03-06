@@ -18,6 +18,8 @@ def scenario2():
     optunahandler.export()
     optunahandler.export_best()
 
+    
+
 
 if __name__=='__main__':
     # scenario1() # 1. Extracted image features

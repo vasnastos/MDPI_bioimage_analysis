@@ -27,6 +27,7 @@ import pickle,oapackage,statistics,optuna
 
 
 from dataset import Dataset,PatchDataset
+from feature_selection import LassoSelector
 from rich.console import Console
 from rich.table import Table
 from functools import reduce
@@ -222,10 +223,11 @@ class ImageNet:
             lasso_grid.fit(xtrain,xtrain)
             coefficients=lasso_grid.best_estimator_.coef_
             feature_importance=np.abs(coefficients)
-            xtrain, xtest = pd.DataFrame(xtrain), pd.DataFrame(xtest)
             xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
             xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-
+        
+        elif feature_selection=='ga':
+            pass
 
 
         # 3. classification model

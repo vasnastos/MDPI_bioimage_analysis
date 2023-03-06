@@ -6,8 +6,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.impute import KNNImputer
 from sklearn.metrics import accuracy_score,r2_score,make_scorer,mean_squared_error
-from sklearn.model_selection import  GridSearchCV
+from sklearn.model_selection import  StratifiedKFold
 from sklearn.linear_model import Lasso
+
+from dataset import Dataset
 
 class GeneticSelector:
     def __init__(self,x_train,x_test,y_train,y_test):
@@ -203,8 +205,21 @@ class LassoSelector:
         ypred=lasso_pipeline.predict(self.xtest)
         return mean_squared_error(self.ytest,ypred)
 
+    def lasso(self,normalize,alpha):
+        scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10)
+        lasso_pipeline = Pipeline(
+        steps=[
+            ('scaler', scaler),
+            ('lasso', Lasso(alpha=alpha,tol=1e-2,max_iter=10000))
+        ],verbose=True)
+
+        lasso_pipeline.fit(self.xtrain,self.ytrain)
+        feature_coefficients=lasso_pipeline.named_steps['lasso'].coef_
+        selected_columns=[column for column in self.xtrain.columns.to_list() if feature_coefficients[column]!=0]
+        return (self.xtrain[selected_columns],self.xtest[selected_columns])
+
     def solve(self):
         study=optuna.create_study(direction='minimize')
-        trial=study.optimize(self.callback,n_trials=50)
+        study.optimize(self.callback,n_trials=50)
 
         return study.best_params
