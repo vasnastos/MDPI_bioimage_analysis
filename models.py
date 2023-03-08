@@ -32,6 +32,7 @@ from rich.console import Console
 from rich.table import Table
 from functools import reduce
 from elayers import AddLayer
+from feature_selection import GeneticSelector,LassoSelector
 
 class Controller:
     freezing_layers = {
@@ -78,6 +79,7 @@ class ImageNet:
         self.log=None
         self.console=None
         self.bioimage_dataframe=None
+        self.bioimage_input, self.bioimage_label = self.dataset.load_image_dataset(split=False)
         self.initialize_tui()
 
     def initialize_tui(self):
@@ -99,21 +101,23 @@ class ImageNet:
         tf.keras.backend.clear_session()
         del self.model
 
+    def plot_random_samples(self):
+        plt.figure(figsize=(12,10))
+
     # Feature extraction function
     def extract_features(self, base_model_name, lb=0, ub=0, save=False):
         self.pretrained_model_name = base_model_name
-        bioimage_input, bioimage_label = self.dataset.load_image_dataset(split=False)
         self.feature_extraction_model(base_model_name, lb, ub)
         self.console.print(f'[bold green] {self.model.summary()}')
 
         feature_set = list()
         labels = list()
-        for i in range(0, bioimage_input.shape[0] // Dataset.batch_size):
+        for i in range(0, self.bioimage_input.shape[0] // Dataset.batch_size):
             batch_indeces = list(range(i, i + Dataset.batch_size))
             batch_images = []
 
             for image_index in batch_indeces:
-                image = np.array(bioimage_input[image_index])
+                image = np.array(self.bioimage_input[image_index])
                 image = np.expand_dims(image, axis=0)
                 image = tf.keras.applications.imagenet_utils.preprocess_input(image)
                 batch_images.append(image)
@@ -124,7 +128,7 @@ class ImageNet:
             flatten_shape = reduce(lambda a, b: a * b, [x for x in list(output_shape) if type(x) == int])
             features = np.reshape(features, (-1, flatten_shape))
             feature_set.append(features)
-            labels.append(np.array(bioimage_label[i:i + Dataset.batch_size]))
+            labels.append(np.array(self.bioimage_label[i:i + Dataset.batch_size]))
 
         # Convert features and labels to arrays
         feature_set = np.vstack(feature_set)
@@ -162,19 +166,19 @@ class ImageNet:
         Creates a feature extraction model in order to extract features from the bioimage dataset
         Parameters
         ----------
-        base_model_name: str
-                Pretrained model to use, possible values[vgg16,vgg19,ResNet50,ResNet101]
-                It is possible versions 2 for some models to be used. Check the compatibility
-        optimizet: tf.keras.optimizers.Optimizer
-            Select the optimization sequence in the feature extraction pretrained model
-        selective_fine_tuning: bool
-        lb: int
-            selective fine tuning lower bound(most likely 0)
-        ub: int
-            selective fine tuning upper bound(differs based onm each pretrained model)
-        
-        Returns: tf.keras.applications.Model
-            based opn the user selection a model architecture  is returned in order be used from the bioimages data
+            * base_model_name: str
+                    Pretrained model to use, possible values[vgg16,vgg19,ResNet50,ResNet101]
+                    It is possible versions 2 for some models to be used. Check the compatibility
+            * optimizer: tf.keras.optimizers.Optimizer
+                Select the optimization sequence in the feature extraction pretrained model
+            * selective_fine_tuning: bool
+            * lb: int
+                selective fine tuning lower bound(most likely 0)
+            * ub: int
+                selective fine tuning upper bound(differs based onm each pretrained model)
+            
+            * Returns: tf.keras.applications.Model
+                based opn the user selection a model architecture  is returned in order be used from the bioimages data
         """
         base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
         base_model.trainable = True
@@ -204,30 +208,35 @@ class ImageNet:
         self.model.save(os.path.join('..','fine_tuned_models',f'fined_tuned_{base_model_name}.h5'))
 
 
-    def conventional_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",clf="ada"):
-        # 1. Scaling features
-        scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
+    def conventional_model(self,xtrain,xtest,ytrain,ytest,scaling="MinMax",feature_selection="lasso",clf="ada"):
+        # # 1. Scaling features
+        # scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
         
-        # 2. Feature selection
-        if feature_selection=='lasso':
-            lasso_pipeline = Pipeline(
-            steps=[
-                ('scaler', scaler),
-                ('lasso', Lasso())
-            ],verbose=True)
+        # # 2. Feature selection
+        # if feature_selection=='lasso':
+        #     lasso_pipeline = Pipeline(
+        #     steps=[
+        #         ('scaler', scaler),
+        #         ('lasso', Lasso())
+        #     ],verbose=True)
 
-            param_grid={"lasso__alpha":list(range(10,20))}
-            scorer=make_scorer(r2_score)
+        #     param_grid={"lasso__alpha":list(range(10,20))}
+        #     scorer=make_scorer(r2_score)
 
-            lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
-            lasso_grid.fit(xtrain,xtrain)
-            coefficients=lasso_grid.best_estimator_.coef_
-            feature_importance=np.abs(coefficients)
-            xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-            xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+        #     lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
+        #     lasso_grid.fit(xtrain,xtrain)
+        #     coefficients=lasso_grid.best_estimator_.coef_
+        #     feature_importance=np.abs(coefficients)
+        #     xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+        #     xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+
+        selector=LassoSelector(xtrain,xtest,ytrain,ytest)
+        params=selector.solve()
+        print(params)
         
-        elif feature_selection=='ga':
-            pass
+        # elif feature_selection=='ga':
+        #     selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
+        #     selector.solve()
 
 
         # 3. classification model

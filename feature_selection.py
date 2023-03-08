@@ -37,7 +37,7 @@ class GeneticSelector:
         max_prob=sorted_propabilities[-index]
         return [ind[0] for ind in population if ind[1]==max_prob]
 
-    def generate_individuals(self,num_individuals:int,num_features:int,max_features=None,verbose=False):
+    def generate_individuals(self,num_individuals:int,num_features:int,max_features=None):
         """
         Randomly selected individuals
         - num_individuals: int
@@ -205,6 +205,12 @@ class LassoSelector:
         ypred=lasso_pipeline.predict(self.xtest)
         return mean_squared_error(self.ytest,ypred)
 
+    def solve(self):
+        study=optuna.create_study(direction='minimize')
+        study.optimize(self.callback,n_trials=50)
+
+        return study.best_params
+
     def lasso(self,normalize,alpha):
         scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10)
         lasso_pipeline = Pipeline(
@@ -217,9 +223,3 @@ class LassoSelector:
         feature_coefficients=lasso_pipeline.named_steps['lasso'].coef_
         selected_columns=[column for column in self.xtrain.columns.to_list() if feature_coefficients[column]!=0]
         return (self.xtrain[selected_columns],self.xtest[selected_columns])
-
-    def solve(self):
-        study=optuna.create_study(direction='minimize')
-        study.optimize(self.callback,n_trials=50)
-
-        return study.best_params
