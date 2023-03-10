@@ -2,10 +2,16 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import MinMaxScaler,StandardScaler
 from sklearn.impute import KNNImputer
 from sklearn.model_selection import train_test_split
-import copy,optuna,random,numpy as np,pandas as pd,os
+from genetic_selection import GeneticSelectionCV
+from sklearn.ensemble import AdaBoostClassifier
+import copy,optuna,random,numpy as np,pandas as pd,os,time,sys
 from rich.console import Console
+from sklearn.model_selection import  StratifiedKFold
+from sklearn.linear_model import Lasso
+from sklearn.pipeline import Pipeline
 import tensorflow as tf
-import sys
+from sklearn.metrics import mean_squared_error
+import statistics
 
 class GSParam:
     population=None
@@ -193,7 +199,77 @@ class GeneticSelector:
 
         return study.best_params
 
-if __name__=='__main__':
+class LassoSelector:
+    def __init__(self,bioimage_dataframe):
+        self.data=bioimage_dataframe
+        self.features=self.data.columns.to_list()
+        self.target=self.features[-1]
+        self.features.remove(self.target)
+
+
+    def optuna_callback(self,trial):
+        normalize=trial.suggest_categorical('scaler',['MinMax','Standardization','KNNImpute'])
+        alpha=trial.suggest_categorical('alpha',[str(x) for x in np.arange(0.5,10,0.5)])
+        iterations=trial.suggest_categorical('max_iters',[str(1000**x) for x in range(1,7)])
+        
+        scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10) 
+        model=Lasso(
+            alpha=int(alpha),
+            tol=1e-2,
+            max_iter=int(iterations),
+            random_state=time.time()
+        )
+
+        pipe=Pipeline(
+            steps=[
+                ('scaler',scaler),
+                ('lasso',model)
+            ]
+        )
+
+        cv_model=StratifiedKFold(n_splits=10)
+        X=self.data[self.features]
+        Y=self.data[self.target]
+        scoring=list()
+        for train_indeces,test_indeces in cv_model.split(X,Y):
+            xtrain=pd.DataFrame(data=[X.iloc[i].to_list() for i in train_indeces],columns=self.features)
+            xtest=pd.DataFrame(data=[X.iloc[i].to_list() for i in test_indeces],columns=self.features)
+            ytrain=pd.Series(data=[Y.iloc[i] for i in train_indeces],name=self.target)
+            ytest=pd.Series(data=[Y.iloc[i] for i in test_indeces],name=self.target)
+
+            pipe.fit(xtrain,ytrain)
+            ypred=pipe.predict(xtest)
+            scoring.append(mean_squared_error(ytest,ypred))
+        
+        return statistics.mean(scoring)
+
+    def solve(self):
+        study=optuna.create_study(direction='minimize')
+        study.optimize(self.optuna_callback,n_trials=100)
+
+        return study.best_params 
+
+
+def genetic_feature_selection(xtrain,xtest,ytrain,ytest,number_of_selected_features:int):
+    estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
+    model=GeneticSelectionCV(
+        estimator=estimator,
+        cv=10,
+        max_features=number_of_selected_features,
+        scoring='accuracy',
+        n_population=100,
+        crossover_independent_proba=0.5,
+        mutation_proba=0.2,
+        n_generations=100,
+        mutation_independent_proba=0.04,
+        tournament_size=5,
+        n_gen_no_change=10,
+        n_jobs=-1        
+    )
+    model=model.fit(xtrain,ytrain)
+    return xtrain.columns[model.support_]
+
+def scenario1():
     for dataset in os.listdir(os.path.join('..','results','extracted_features')):
         bioimage_dataframe=pd.read_csv(filepath_or_buffer=os.path.join('..','results','extracted_features',dataset),header=0)
 
@@ -214,3 +290,28 @@ if __name__=='__main__':
             writer.write('# Best parameters Genetic selector parameters')
             for param,value in best_parameters.items():
                 writer.write(f'{param}\t{value}')
+
+def scenario2():
+    for dataset in os.listdir(os.path.join('..','results','extracted_features')):
+        bioimage_dataframe=pd.read_csv(filepath_or_buffer=os.path.join('..','results','extracted_features',dataset),header=0)
+        train_set,test_set=train_test_split(bioimage_dataframe)
+
+        features=bioimage_dataframe.columns.to_list()
+        target=features[-1]
+        features.remove(target)
+
+        xtrain=train_set[features]
+        xtest=train_set[features]
+        ytrain=test_set[target]
+        ytest=test_set[target]
+
+        selected_features=genetic_feature_selection(xtrain,xtest,ytrain,ytest)
+        with open(os.path.join('.','results','optuna','GeneticSelector',f'genetic_selector_sklearn_{dataset.removesuffix(".csv")}.txt'),'w') as writer:
+            writer.write(",".join(selected_features))
+
+def scenario3():
+    pass
+
+if __name__=='__main__':
+    scenario1() # 1. Custom feature selector using genetic algorithm
+    scenario2() # 2. sklearn genetic selector
