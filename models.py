@@ -189,6 +189,7 @@ class ImageNet:
         self.model.add(tf.keras.layers.InputLayer(input_shape=Dataset.image_size,name='feature_extractor_input_layer'))
         self.model.add(base_model)
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
+        print(self.model.summary())
     
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
         base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
