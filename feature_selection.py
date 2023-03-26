@@ -8,10 +8,16 @@ from sklearn.impute import KNNImputer
 from sklearn.metrics import accuracy_score,r2_score,make_scorer,mean_squared_error
 from sklearn.model_selection import  StratifiedKFold
 from sklearn.linear_model import Lasso
-
+from sklearn.ensemble import AdaBoostClassifier
 from dataset import Dataset
+from genetic_selection import GeneticSelectionCV
+
 
 class GeneticSelector:
+    """
+        Deprecated: Genetic Selector from sklearn used eventually
+    """
+    
     def __init__(self,x_train,x_test,y_train,y_test):
         self.xtrain=x_train
         self.xtest=x_test
@@ -223,3 +229,24 @@ class LassoSelector:
         feature_coefficients=lasso_pipeline.named_steps['lasso'].coef_
         selected_columns=[column for column in self.xtrain.columns.to_list() if feature_coefficients[column]!=0]
         return (self.xtrain[selected_columns],self.xtest[selected_columns])
+
+
+def skgenetic_feature_selection(xtrain,xtest,ytrain,ytest,number_of_selected_features:int):
+    estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
+    model=GeneticSelectionCV(
+        estimator=estimator,
+        cv=10,
+        max_features=number_of_selected_features,
+        scoring='accuracy',
+        n_population=100,
+        crossover_independent_proba=0.5,
+        mutation_proba=0.2,
+        n_generations=100,
+        mutation_independent_proba=0.04,
+        tournament_size=5,
+        n_gen_no_change=10,
+        n_jobs=-1,
+        verbose=True        
+    )
+    model=model.fit(xtrain,ytrain)
+    return xtrain.columns[model.support_]

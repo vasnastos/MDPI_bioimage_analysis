@@ -15,7 +15,6 @@ from sklearn.ensemble import VotingClassifier
 from sklearn.impute import KNNImputer
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.decomposition import PCA
 from matplotlib.image import imread
 import matplotlib.pyplot as plt
 from sklearn.pipeline import Pipeline
@@ -25,14 +24,13 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 import pickle,oapackage,statistics,optuna
 
-
-from dataset import Dataset,PatchDataset
+from dataset import Dataset
 from feature_selection import LassoSelector
 from rich.console import Console
 from rich.table import Table
 from functools import reduce
 from elayers import AddLayer
-from feature_selection import GeneticSelector,LassoSelector
+from feature_selection import LassoSelector,skgenetic_feature_selection
 
 class Controller:
     freezing_layers = {
@@ -209,7 +207,7 @@ class ImageNet:
         self.model.save(os.path.join('..','fine_tuned_models',f'fined_tuned_{base_model_name}.h5'))
 
 
-    def conventional_model(self,xtrain,xtest,ytrain,ytest,scaling="MinMax",feature_selection="lasso",clf="ada"):
+    def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada"):
         # # 1. Scaling features
         # scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
         
@@ -230,10 +228,13 @@ class ImageNet:
         #     feature_importance=np.abs(coefficients)
         #     xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
         #     xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-
-        selector=LassoSelector(xtrain,xtest,ytrain,ytest)
-        params=selector.solve()
-        print(params)
+        columns=None
+        if feature_selection=="lasso":
+            selector=LassoSelector(xtrain,xtest,ytrain,ytest)
+            columns=selector.solve()
+        elif feature_selection=="genetic":
+            columns=Ge
+    
         
         # elif feature_selection=='ga':
         #     selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
@@ -370,7 +371,6 @@ class ImageNet:
             self.console(f'[bold red]:right arrow: [bold green]Cohens Kappa:{ck}')
             print(end='\n\n')
     
-    # -->Fit ImageNet model in to a dataset
     def fit(self,xtrain,ytrain):
         self.log.debug(self.model)
         if not hasattr(self.model,"fit"):
@@ -474,11 +474,11 @@ class OptunaModel:
         with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_value.pkl'), 'wb') as f:
             pickle.dump(self.study.best_value, f)
     
-    def pareto_front(self):
-        metrics=[
-            'accuracy',
-            'f1-score',
-            'cohens_kappa'
-        ]
+    # def pareto_front(self):
+    #     metrics=[
+    #         'accuracy',
+    #         'f1-score',
+    #         'cohens_kappa'
+    #     ]
 
-        pareto_objects=oapackage.ParetoDoubleLong()
+    #     pareto_objects=oapackage.ParetoDoubleLong()

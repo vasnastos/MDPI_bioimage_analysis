@@ -210,14 +210,14 @@ class LassoSelector:
     def optuna_callback(self,trial):
         normalize=trial.suggest_categorical('scaler',['MinMax','Standardization','KNNImpute'])
         alpha=trial.suggest_categorical('alpha',[str(x) for x in np.arange(0.5,10,0.5)])
-        iterations=trial.suggest_categorical('max_iters',[str(1000**x) for x in range(1,7)])
+        iterations=trial.suggest_categorical('max_iters',[str(10**x) for x in range(3,7)])
         
         scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10) 
         model=Lasso(
-            alpha=int(alpha),
+            alpha=float(alpha),
             tol=1e-2,
             max_iter=int(iterations),
-            random_state=time.time()
+            random_state=1234
         )
 
         pipe=Pipeline(
@@ -250,25 +250,6 @@ class LassoSelector:
         return study.best_params 
 
 
-def genetic_feature_selection(xtrain,xtest,ytrain,ytest,number_of_selected_features:int):
-    estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
-    model=GeneticSelectionCV(
-        estimator=estimator,
-        cv=10,
-        max_features=number_of_selected_features,
-        scoring='accuracy',
-        n_population=100,
-        crossover_independent_proba=0.5,
-        mutation_proba=0.2,
-        n_generations=100,
-        mutation_independent_proba=0.04,
-        tournament_size=5,
-        n_gen_no_change=10,
-        n_jobs=-1        
-    )
-    model=model.fit(xtrain,ytrain)
-    return xtrain.columns[model.support_]
-
 def scenario1():
     for dataset in os.listdir(os.path.join('..','results','extracted_features')):
         bioimage_dataframe=pd.read_csv(filepath_or_buffer=os.path.join('..','results','extracted_features',dataset),header=0)
@@ -286,7 +267,7 @@ def scenario1():
         selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
         best_parameters=selector.tune()
 
-        with open(os.path.join('.','results','optuna','GeneticSelector','genetic_selector.txt','w')) as writer:
+        with open(os.path.join('.','results','optuna','GeneticSelector',f'genetic_selector_{dataset.removesuffix(".csv")}.txt'),'w') as writer:
             writer.write('# Best parameters Genetic selector parameters')
             for param,value in best_parameters.items():
                 writer.write(f'{param}\t{value}')
@@ -305,13 +286,22 @@ def scenario2():
         ytrain=test_set[target]
         ytest=test_set[target]
 
-        selected_features=genetic_feature_selection(xtrain,xtest,ytrain,ytest)
+        selected_features=skgenetic_feature_selection(xtrain,xtest,ytrain,ytest)
         with open(os.path.join('.','results','optuna','GeneticSelector',f'genetic_selector_sklearn_{dataset.removesuffix(".csv")}.txt'),'w') as writer:
             writer.write(",".join(selected_features))
 
 def scenario3():
-    pass
+    for dataset in os.listdir(os.path.join('..','results','extracted_features')):
+        bioimage_dataframe=pd.read_csv(filepath_or_buffer=os.path.join('..','results','extracted_features',dataset),header=0)
+        selector=LassoSelector(bioimage_dataframe)
+        best_parameters=selector.solve()
+
+        with open(os.path.join('.','results','optuna','LassoSelector',f'{dataset.removesuffix(".csv")}.txt'),'w') as writer:
+            writer.write(f'# Best parameters Lasso selector. Extracted Parameters:{dataset.removesuffix(".csv")}')
+            for param,value in best_parameters.items():
+                writer.write(f'{param}\t{value}')
 
 if __name__=='__main__':
-    scenario1() # 1. Custom feature selector using genetic algorithm
-    scenario2() # 2. sklearn genetic selector
+    # scenario1() # 1. Custom feature selector using genetic algorithm
+    # scenario2() # 2. sklearn genetic selector
+    scenario3() # 3. Feature selection using Lasso Feature Selection
