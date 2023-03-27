@@ -30,7 +30,7 @@ from rich.console import Console
 from rich.table import Table
 from functools import reduce
 from elayers import AddLayer
-from feature_selection import LassoSelector,skgenetic_feature_selection
+from feature_selection import LassoSelector,GeneticSelector
 
 class Controller:
     freezing_layers = {
@@ -207,39 +207,15 @@ class ImageNet:
         self.model.save(os.path.join('..','fine_tuned_models',f'fined_tuned_{base_model_name}.h5'))
 
 
-    def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada"):
-        # # 1. Scaling features
-        # scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
-        
-        # # 2. Feature selection
-        # if feature_selection=='lasso':
-        #     lasso_pipeline = Pipeline(
-        #     steps=[
-        #         ('scaler', scaler),
-        #         ('lasso', Lasso())
-        #     ],verbose=True)
-
-        #     param_grid={"lasso__alpha":list(range(10,20))}
-        #     scorer=make_scorer(r2_score)
-
-        #     lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
-        #     lasso_grid.fit(xtrain,xtrain)
-        #     coefficients=lasso_grid.best_estimator_.coef_
-        #     feature_importance=np.abs(coefficients)
-        #     xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-        #     xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
+    def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada",**kwargs):
         columns=None
         if feature_selection=="lasso":
             selector=LassoSelector(xtrain,xtest,ytrain,ytest)
             columns=selector.solve()
         elif feature_selection=="genetic":
-            columns=Ge
-    
-        
-        # elif feature_selection=='ga':
-        #     selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
-        #     selector.solve()
-
+            num_of_features=xtrain.shape[1]//2
+            if 'k_selected_features' in kwargs:
+                num_of_features=int(kwargs['k_selected_features'])
 
         # 3. classification model
         del self.model

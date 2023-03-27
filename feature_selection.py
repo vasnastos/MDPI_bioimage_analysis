@@ -1,16 +1,18 @@
 import tensorflow as tf
-import math,copy,pandas as pd,numpy as np,random,time,psutil,optuna
+import copy,numpy as np,random,optuna
 from rich.console import Console
-
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.impute import KNNImputer
 from sklearn.metrics import accuracy_score,r2_score,make_scorer,mean_squared_error
-from sklearn.model_selection import  StratifiedKFold
 from sklearn.linear_model import Lasso
 from sklearn.ensemble import AdaBoostClassifier
-from dataset import Dataset
 from genetic_selection import GeneticSelectionCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import KNNImputer
+from sklearn.metrics import accuracy_score,f1_score
+from sklearn.model_selection import StratifiedKFold
+import os,pandas as pd
 
 
 class GeneticSelector:
@@ -190,15 +192,18 @@ class GeneticSelector:
         return population
 
 class LassoSelector:
-    def __init__(self,x_train,x_test,y_train,y_test):
+    def __init__(self,dataset_id,x_train,x_test,y_train,y_test,pretrained_model):
+        self.id
         self.xtrain=x_train
         self.xtest=x_test
         self.ytrain=y_train
-        self.yest=y_test
+        self.ytest=y_test
+        self.model_name=pretrained_model
+        self.configurations=dict()
     
     def callback(self,trial):
         normalize=trial.suggest_categorical('scaling_method',['MinMax','Standardization','KnnImpute'])
-        alpha_param=trial.suggest_categorical('lasso_alpha',[str(x) for x in range(0.5,20,0.5)])
+        alpha_param=trial.suggest_categorical('lasso_alpha',[str(x) for x in np.arange(0.5,20,0.5)])
         
         scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10)
         lasso_pipeline = Pipeline(
@@ -209,15 +214,24 @@ class LassoSelector:
 
         lasso_pipeline.fit(self.xtrain,self.ytrain)
         ypred=lasso_pipeline.predict(self.xtest)
+        self.configurations[(normalize,alpha_param)]=mean_squared_error(self.ytest,ypred),r2_score(self.ytest,ypred)
+
         return mean_squared_error(self.ytest,ypred)
 
-    def solve(self):
+    def optimize(self):
         study=optuna.create_study(direction='minimize')
         study.optimize(self.callback,n_trials=50)
 
+        file_exists=os.path.exists(os.path.join('','results','optuna','LassoSelector',f'selector_optimization_{self.model_name}.csv'))
+        with open(os.path.join('','results','optuna','LassoSelector',f'selector_optimization_{self.model_name}.csv'),'a') as writer:
+            if not file_exists:
+                writer.write('Model,Lower Bound,Upper Bound,Scaling method,Number of Features,Accuracy,F1-Score\n')
+            for (scaling,number_of_features),(mse,r2s) in self.configurations.items():
+                writer.write(f'{self.model_name},{scaling},{number_of_features},{mse},{r2s}\n')
+
         return study.best_params
 
-    def lasso(self,normalize,alpha):
+    def select(self,normalize,alpha):
         scaler=MinMaxScaler() if normalize=='MinMax' else StandardScaler() if normalize=='Standardization' else KNNImputer(n_neighbors=10)
         lasso_pipeline = Pipeline(
         steps=[
@@ -230,23 +244,137 @@ class LassoSelector:
         selected_columns=[column for column in self.xtrain.columns.to_list() if feature_coefficients[column]!=0]
         return (self.xtrain[selected_columns],self.xtest[selected_columns])
 
+class GeneticSelector:
+    def __init__(self,_xtrain,_xtest,_ytrain,_ytest,pretrained_model):
+        self.xtrain=_xtrain
+        self.xtest=_xtest
+        self.ytrain=_ytrain
+        self.ytest=_ytest
+        self.configurations=dict()
+        self.model_name=pretrained_model
+    
+    def solve(self,trial):
+        scaling_method=trial.suggest_categorical('scaling',["MinMax","z-Score","knn-Impute"])
+        number_of_selected_features=trial.suggest_categorical('number_of_selected_features',list(range(self.xtrain.shape[1]//2,self.xtrain.shape[1])))
 
-def skgenetic_feature_selection(xtrain,xtest,ytrain,ytest,number_of_selected_features:int):
-    estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
-    model=GeneticSelectionCV(
-        estimator=estimator,
-        cv=10,
-        max_features=number_of_selected_features,
-        scoring='accuracy',
-        n_population=100,
-        crossover_independent_proba=0.5,
-        mutation_proba=0.2,
-        n_generations=100,
-        mutation_independent_proba=0.04,
-        tournament_size=5,
-        n_gen_no_change=10,
-        n_jobs=-1,
-        verbose=True        
-    )
-    model=model.fit(xtrain,ytrain)
-    return xtrain.columns[model.support_]
+        # 1. Scaling procedure
+        scaler=MinMaxScaler() if scaling_method=="MinMax" else StandardScaler() if scaling_method=='z-Score' else KNNImputer(n_neighbors=10)
+        self.xtrain=scaler.fit_transform(self.xtrain,self.ytrain)
+        self.xtest=scaler.fit_transform(self.xtrain,self.ytrain)
+
+        # 2. Genetic Selection
+        estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
+        model=GeneticSelectionCV(
+            estimator=estimator,
+            cv=10,
+            max_features=number_of_selected_features,
+            scoring='accuracy',
+            n_population=100,
+            crossover_independent_proba=0.5,
+            mutation_proba=0.2,
+            n_generations=100,
+            mutation_independent_proba=0.04,
+            tournament_size=5,
+            n_gen_no_change=10,
+            n_jobs=-1,
+            verbose=True        
+        )
+        model=model.fit(self.xtrain,self.ytrain)
+        self.xtrain=self.xtrain[model.get_feature_names_out()]
+        self.xtest=self.xtest[model.get_feature_names_out()]
+
+        estimateModel=RandomForestClassifier(n_estimators=100,class_weight='balanced')
+        estimateModel=estimateModel.fit(self.xtrain,self.ytrain)
+        predictions=estimateModel.predict(self.xtest)
+        acc_score,f1=accuracy_score(self.ytest,predictions),f1_score(self.ytest,predictions)
+        self.configurations[(scaling_method,number_of_selected_features)]=(acc_score,f1)
+        return acc_score,f1
+
+    def optimize(self):
+        study=optuna.create_study(directions=['maximize','maximize'])
+        study.optimize(self.solve,n_trials=50)
+
+        file_exists=os.path.exists(os.path.join('','results','optuna','GeneticSelector',f'selector_optimization_{self.model_name}.csv'))
+        with open(os.path.join('','results','optuna','GeneticSelector',f'selector_optimization_{self.model_name}.csv'),'a') as writer:
+            if not file_exists:
+                writer.write('Model','Scaling method','Number of Features','Accuracy','F1-Score\n')
+            for (scaling,number_of_features),(acc_score,f1score) in self.configurations.items():
+                writer.write(f'{self.model_name},{scaling},{number_of_features},{acc_score},{f1score}\n')
+        
+        return study.best_params
+
+    def select(self,scaling_method,number_of_features):
+        scaler=MinMaxScaler() if scaling_method=="MinMax" else StandardScaler() if scaling_method=='z-Score' else KNNImputer(n_neighbors=10)
+        self.xtrain=scaler.fit_transform(self.xtrain,self.ytrain)
+        self.xtest=scaler.fit_transform(self.xtrain,self.ytrain)
+
+        # 2. Genetic Selection
+        estimator= AdaBoostClassifier(learning_rate=1e-3,n_estimators=100)
+        model=GeneticSelectionCV(
+            estimator=estimator,
+            cv=10,
+            max_features=number_of_features,
+            scoring='accuracy',
+            n_population=100,
+            crossover_independent_proba=0.5,
+            mutation_proba=0.2,
+            n_generations=100,
+            mutation_independent_proba=0.04,
+            tournament_size=5,
+            n_gen_no_change=10,
+            n_jobs=-1,
+            verbose=True        
+        )
+        model=model.fit(self.xtrain,self.ytrain)
+        self.xtrain=self.xtrain[model.get_feature_names_out()]
+        self.xtest=self.xtest[model.get_feature_names_out()]
+    
+    def get_params(self):
+        return self.xtrain,self.xtest
+
+def scenario1():
+    for dataset in os.listdir(os.path.join('','results','extracted_features')):
+        data=pd.read_csv(os.path.join(os.path.join('','results','extracted_features',dataset)),header=[0])
+        cv_model=StratifiedKFold(n_splits=10)
+        features=data.columns.to_list()
+        target=features[-1]
+        features.remove(target)
+        X,Y=data[features],data[target]
+        pretrained_model=dataset.split("_")[2]
+
+        for train_set,test_set in cv_model.split(X,Y):
+            xtrain=pd.DataFrame(data=[X.iloc[i][features].to_list() for i in train_set],columns=X.columns.to_list())
+            xtest=pd.DataFrame(data=[X.iloc[i][features].to_list() for i in test_set],columns=X.columns.to_list())
+            ytrain=pd.Series(data=[Y.iloc[i] for i in train_set],name=target)
+            ytest=pd.Series(data=[Y.iloc[i] for i in test_set],name=target)
+
+            selector=GeneticSelector(xtrain,xtest,ytrain,ytest,pretrained_model)
+            print(selector.optimize())
+
+def scenario2():
+    for dataset in os.listdir(os.path.join('','results','extracted_features')):
+        data=pd.read_csv(os.path.join(os.path.join('','results','extracted_features',dataset)),header=[0])
+        cv_model=StratifiedKFold(n_splits=10)
+        features=data.columns.to_list()
+        target=features[-1]
+        features.remove(target)
+        X,Y=data[features],data[target]
+        pretrained_model=dataset.split("_")[2]
+
+        for train_set,test_set in cv_model.split(X,Y):
+            xtrain=pd.DataFrame(data=[X.iloc[i][features].to_list() for i in train_set],columns=X.columns.to_list())
+            xtest=pd.DataFrame(data=[X.iloc[i][features].to_list() for i in test_set],columns=X.columns.to_list())
+            ytrain=pd.Series(data=[Y.iloc[i] for i in train_set],name=target)
+            ytest=pd.Series(data=[Y.iloc[i] for i in test_set],name=target)
+
+            selector=LassoSelector(xtrain,xtest,ytrain,ytest,pretrained_model)
+            print(selector.optimize())
+
+if __name__=='__main__':
+    scenario1() # Genetic Selector
+    # scenario2() # Lasso Extractibon Selector
+    
+
+
+
+
