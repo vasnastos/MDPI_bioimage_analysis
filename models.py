@@ -1,7 +1,6 @@
 import os,numpy as np,psutil,seaborn as sns,logging,cv2,pandas as pd
 
 from sklearn.model_selection import StratifiedKFold
-from sklearn.feature_selection import RFE
 from sklearn.linear_model import Lasso
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import SVC
@@ -22,7 +21,7 @@ from collections import defaultdict
 
 import tensorflow as tf
 import tensorflow_addons as tfa
-import pickle,oapackage,statistics,optuna
+import pickle,statistics,optuna
 
 from dataset import Dataset
 from feature_selection import LassoSelector
@@ -30,7 +29,8 @@ from rich.console import Console
 from rich.table import Table
 from functools import reduce
 from elayers import AddLayer
-from feature_selection import LassoSelector,GeneticSelector
+
+from feature_selection import LassoSelector,GeneticSelector,RFESelector
 
 class Controller:
     freezing_layers = {
@@ -216,6 +216,12 @@ class ImageNet:
             num_of_features=xtrain.shape[1]//2
             if 'k_selected_features' in kwargs:
                 num_of_features=int(kwargs['k_selected_features'])
+                selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
+        elif feature_selection=='pca':
+            num_of_features=xtrain.shape[1]//2
+            if 'k_selected_features' in kwargs:
+                num_of_features=int(kwargs['k_selected_features'])
+                selector=PCASelector(xtrain,xtest,ytrain,ytest)
 
         # 3. classification model
         del self.model
@@ -257,16 +263,16 @@ class ImageNet:
         del self.model
         voting_clf = VotingClassifier(
             estimators = [
-                GaussianNB(),
                 KNeighborsClassifier(n_neighbors=10),
                 DecisionTreeClassifier(max_depth=8,class_weight='balanced'),
                 SVC(kernel='rbf',decision_function_shape='ovo',break_ties=True),
                 RandomForestClassifier(max_depth=8,n_estimators=50,verbose=True),                
-                AdaBoostClassifier(n_estimators=50,learning_rate=1e-4)                
+                AdaBoostClassifier(n_estimators=50,learning_rate=1e-2)                
             ],
             voting = voting,
             flatten_transform = False,
-            verbose = True
+            verbose = True,
+            n_jobs=-1
         )
         self.model = voting_clf.fit(xtrain,ytrain)
     
@@ -449,12 +455,3 @@ class OptunaModel:
         # save the best value of the objective function
         with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_value.pkl'), 'wb') as f:
             pickle.dump(self.study.best_value, f)
-    
-    # def pareto_front(self):
-    #     metrics=[
-    #         'accuracy',
-    #         'f1-score',
-    #         'cohens_kappa'
-    #     ]
-
-    #     pareto_objects=oapackage.ParetoDoubleLong()
