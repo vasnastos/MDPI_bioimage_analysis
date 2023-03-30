@@ -261,6 +261,28 @@ def pareto(fselector):
     with open(os.path.join('','results',f'{subfolder}_pareto_optimal_objects.tex'),'w') as writer:
         writer.write(tabulate(rows,headers=column_names,tablefmt='latex'))
 
+def  best_params(fselector='gs'):
+    subfolder=None
+    metrics=[]
+    if fselector=='gs':
+        subfolder='GeneticSelector'
+        metrics=[
+            'Accuracy Score',
+            'F1 Score'
+        ]
+    elif fselector=='lasso':
+        subfolder='LassoSelector'
+        metrics=[
+            'Mean Square Error',
+            'R2-Square'
+        ]
+    elif fselector=='pca':
+        subfolder='PCA'
+        metrics=[
+            'Accuracy Score',
+            'F1 Score'
+        ]
+
 
 def scenario1():
     for dataset in os.listdir(os.path.join('','results','extracted_features')):

@@ -1,6 +1,6 @@
 import os,optuna,numpy as np,pickle
 
-from models import ImageNet,OptunaModel,Controller
+from models import ImageNet,Controller
 from sklearn.model_selection import StratifiedKFold
 from elayers import OptunaParamLayer
 
@@ -12,18 +12,8 @@ def scenario1():
         for ubound in upper_bounds:
             imageNN.extra=imageNN.extract_features(base_model_name=pretrained_model_name,lb=0,ub=ubound,save=True)
 
+
 def scenario2():
-    imageNN=ImageNet()
-    optunahandler=OptunaModel(new_study_case="Study_scenario_2")
-    for param,scope in {'accuracy_score':"maximize",'f1_score':"maximize",'cohens_kappa':"maximize"}.items():
-        optunahandler.add_objective_dimension(param,scope)
-
-    optunahandler.set_callback(imageNN.optuna_callback)
-    optunahandler.export()
-    optunahandler.export_best()
-
-
-def scenario3():
     """
         Tune the selective fine tuning model using:
             - Pretrained models: vgg-16,vgg19,resnet50,resnet101
@@ -34,7 +24,6 @@ def scenario3():
             - Optimizers: 'adam','sgd'
     """
     imageNN=ImageNet()
-    
     Xentry,Yentry=imageNN.dataset.load_image_dataset(split=False)
     Xentry=np.array(Xentry)
     Yentry=np.array(Yentry)
@@ -56,8 +45,6 @@ def scenario3():
     with open(os.path.join('','results','pickle_ImageNET_Evaluation.pcl'),'wb') as bwriter:
         pickle.dump(OptunaParamLayer.results,bwriter)
 
-
 if __name__=='__main__':
     # scenario1() # 1. Extracted image features
-    # scenario2() # 2. Optimize the hyperparameters in the models
-    scenario3() # Evaluate the performance of the transfer learning model
+    scenario2() # 2. Evaluate the performance of the transfer learning model 
