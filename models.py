@@ -405,7 +405,6 @@ class ImageNet:
         self.console.rule('[bold red]Biomadical images dataset descriptive analytics')
         self.console.print(stats_table)
 
-
 class OptunaModel:
     study_case_results_path=os.path.join('','optuna')
     study_results=dict()
