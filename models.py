@@ -81,20 +81,10 @@ class ImageNet:
         self.dataset=Dataset()
         self.model=None
         self.pretrained_model_name=''
-        self.log=None
-        self.console=None
         self.bioimage_dataframe=None
+        self.selector=None
+        self.params=list()
         self.bioimage_input, self.bioimage_label = self.dataset.load_image_dataset(split=False)
-        self.initialize_tui()
-
-    def initialize_tui(self):
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-        sh = logging.StreamHandler()
-        formatter=logging.Formatter('%(asctime)s\t%(message)s')
-        sh.setFormatter(formatter)
-        self.log=logging.getLogger(name=f'rcc_staging_logger')
-        self.log.addHandler(sh)
         self.console=Console(record=True)
     
     def clear_session(self):
@@ -190,6 +180,22 @@ class ImageNet:
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
         print(self.model.summary())
     
+    def preprocessing(self,feature_selection='gs'):
+        if feature_selection=='gs':
+            configurations=GeneticSelector.loader()
+            self.params={"scaling":configurations[4],"features":configurations[5]}
+            self.selector='gs'
+        elif feature_selection=='lasso':
+            configurations=LassoSelector.loader()
+            self.params={"scaling":configurations[4],"alpha":configurations[5],"features":configurations[6]}
+            self.selector='lasso'
+        elif feature_selection=='pca':
+            configurations=PCASelector.loader()
+            self.params={"scaling":configurations[4],"features":configurations[5]}
+            self.selector='pca'
+        
+        self.extract_features(base_model_name=configurations[1], lb=configurations[2],ub=configurations[3],save=False)
+    
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
         self.clear_session()
 
@@ -208,22 +214,29 @@ class ImageNet:
         self.model.compile(optimizer=ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy', metrics=['accuracy'])
         print(self.model.summary())
 
-    def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada",**kwargs):
-        # To be fixed
-        columns=None
-        if feature_selection=="lasso":
-            pass
-        elif feature_selection=="genetic":
-            pass
-        elif feature_selection=='pca':
-            pass
+    def conventional_model(self,xtrain,xtest,ytrain,ytest,clf="ada",**kwargs):
+        # 1. Load config and feature selection
+        # if self.selector=='gs':
+        #     GeneticSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
+        # elif self.selector=='lasso':
+        #     LassoSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'],alpha=self.params['alpha'])
+        # elif self.selector=='pca':
+        print('Params:',self.params)
+        PCASelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
 
-        # 3. classification model
+        # 2. classification model
+        if clf=='all':
+            results=[]
+            # Test the model performance
+            for model_name in ['knn','svm','rf','adaboost']:
+                cmodel=KNeighborsClassifier(n_neighbors=10,metric='euclidean') if model_name=='knn' else SVC(kernel='rbf',decision_function_shape='ovo', break_ties=False) if model_name=='svm' else RandomForestClassifier(n_estimators=100,max_depth=8,class_weight='balanced',random_state=1234) if model_name=='adaboost' else AdaBoostClassifier(learning_rate=1e-5)
+                cmodel=cmodel.fit(xtrain,ytrain)
+                predictions=cmodel.predict(xtest)
+                results.append((model_name,[accuracy_score(ytest,predictions),recall_score(ytest,predictions),precision_score(ytest,predictions),f1_score(ytest,predictions)]))
+
         del self.model
         self.model = None
-        if clf == 'naive_bayes':
-            self.model = GaussianNB()
-        elif clf == 'knn':
+        if clf == 'knn':
             self.model = KNeighborsClassifier(n_neighbors=10,metric='euclidean')
         elif clf == 'svm':
             self.model = SVC(kernel='rbf',decision_function_shape='ovo', break_ties=False)
@@ -235,26 +248,6 @@ class ImageNet:
         self.model=self.model.fit(xtrain,ytrain)
     
     def voting_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",voting='soft'):
-        # 1. Scaling features
-        scaler= MinMaxScaler() if scaling == 'MinMax' else StandardScaler() if scaling == 'Standardization' else KNNImputer()
-        
-        # 2. Feature selection
-        if feature_selection=='lasso':
-            lasso_pipeline = Pipeline(
-                steps=[
-                    ('scaler', scaler),
-                    ('lasso', Lasso(max_iter=100000))
-                ],verbose=True
-            )
-            param_grid={"lasso__alpha":[0.1,0.5,1.0,1.5,2.0,4.0,5.0]}
-            scorer=make_scorer(r2_score)
-            lasso_grid = GridSearchCV(lasso_pipeline, param_grid=param_grid, cv=5,scoring=scorer,n_jobs=psutil.cpu_count(logical=False))
-            lasso_grid.fit(xtrain,xtrain)
-            coefficients=lasso_grid.best_estimator_.coef_
-            feature_importance=np.abs(coefficients)
-            xtrain.drop([column_name for i, column_name in enumerate(xtrain.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-            xtest.drop([column_name for i, column_name in enumerate(xtest.columns.tolist()) if feature_importance[i]==0], axis=1, inplace=True)
-        
         del self.model
         voting_clf = VotingClassifier(
             estimators = [
@@ -376,12 +369,12 @@ class ImageNet:
         
         return statistics.mean(maccuracy),statistics.mean(mf1)
 
+
     def fit(self,xtrain,ytrain):
         if not hasattr(self.model,"fit"):
             raise AttributeError(f"No method fit found in {type(self.model)}")
         
         if type(self.model)==tf.keras.Sequential:
-
             self.model.fit(
                 tf.convert_to_tensor(xtrain),
                 tf.convert_to_tensor(ytrain),

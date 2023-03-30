@@ -1,6 +1,7 @@
-import os,json,random
+import os,json,random,copy
 import tensorflow as tf,numpy as np
 from rich.console import Console
+from sklearn.metrics import accuracy_score
 
 class JSON_Parser:
     path_to_data_files = os.path.join('..','Dataset')

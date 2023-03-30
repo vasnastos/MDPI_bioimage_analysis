@@ -78,6 +78,11 @@ class LassoSelector:
         selected_columns=[column for column in self.xtrain.columns.to_list() if feature_coefficients[column]!=0]
         return (self.xtrain[selected_columns],self.xtest[selected_columns])
 
+    @staticmethod
+    def loader():
+        data=pd.read_csv(os.path.join('','results','LassoSelector_pareto_optimal_objects.csv'),header=[0])
+        return data.iloc[0].to_list()
+
 class GeneticSelector:
     def __init__(self,_xtrain,_xtest,_ytrain,_ytest,pretrained_model):
         self.xtrain=_xtrain
@@ -87,7 +92,7 @@ class GeneticSelector:
         self.configurations=dict()
         self.model_name=pretrained_model
     
-    def solve(self,trial):
+    def callback(self,trial):
         scaling_method=trial.suggest_categorical('scaling',["MinMax","z-Score","knn-Impute"])
         number_of_selected_features=trial.suggest_categorical('number_of_selected_features',list(range(self.xtrain.shape[1]//2,self.xtrain.shape[1])))
 
@@ -126,7 +131,7 @@ class GeneticSelector:
 
     def optimize(self):
         study=optuna.create_study(directions=['maximize','maximize'])
-        study.optimize(self.solve,n_trials=50)
+        study.optimize(self.callback,n_trials=50)
 
         file_exists=os.path.exists(os.path.join('','results','optuna','GeneticSelector',f'selector_optimization_{self.model_name}.csv'))
         with open(os.path.join('','results','optuna','GeneticSelector',f'selector_optimization_{self.model_name}.csv'),'a') as writer:
@@ -137,8 +142,15 @@ class GeneticSelector:
         
         return study.best_params
 
-    def select(self,scaling_method,number_of_features):
-        scaler=MinMaxScaler() if scaling_method=="MinMax" else StandardScaler() if scaling_method=='z-Score' else KNNImputer(n_neighbors=10)
+    @staticmethod
+    def fit_transform(self,xtrain,xtest,ytrain,ytest,**kwargs):
+        if 'scaling' not in kwargs or 'k_features' not in kwargs:
+            raise ValueError('You did not provide the right amount of arguments')
+
+        scaling=kwargs['scaling']
+        k_features=int(kwargs['k_features'])
+
+        scaler=MinMaxScaler() if scaling=="MinMax" else StandardScaler()
         self.xtrain=scaler.fit_transform(self.xtrain,self.ytrain)
         self.xtest=scaler.fit_transform(self.xtrain,self.ytrain)
 
@@ -147,7 +159,7 @@ class GeneticSelector:
         model=GeneticSelectionCV(
             estimator=estimator,
             cv=10,
-            max_features=number_of_features,
+            max_features=k_features,
             scoring='accuracy',
             n_population=100,
             crossover_independent_proba=0.5,
@@ -165,6 +177,11 @@ class GeneticSelector:
     
     def get_params(self):
         return self.xtrain,self.xtest
+
+    @staticmethod
+    def loader():
+        data=pd.read_csv(os.path.join('','results','GeneticSelector_pareto_optimal_objects.csv'),header=[0])
+        return data.iloc[0].to_list()
 
 class PCASelector:
     def __init__(self,dataset_id,_xtrain,_xtest,_ytrain,_ytest) -> None:
@@ -206,6 +223,32 @@ class PCASelector:
                 writer.write('Pretrained model,Lower Bound,Upper bound,Scaling,Number of features,Accuracy Score,F1 Score,Cohens Kappa Score\n')
             for (scaling,nof),(acc_score,f1,cohens) in self.configurations.items():
                 writer.write(f'{self.pretrained_model_name},{self.lb},{self.ub},{scaling},{nof},{acc_score},{f1},{cohens}\n')
+    
+    @staticmethod
+    def fit_transform(xtrain,xtest,ytrain,ytest,**kwargs):
+        if 'k_features' in kwargs:
+            k_features=int(kwargs['k_features'])
+        else:
+            raise ValueError('No number of features are provided in the workflow')
+        if 'scaling' in kwargs:
+            scaling=kwargs['scaling']
+            raise ValueError('No scaling method is provided in the workflow')
+
+        pipe=Pipeline(
+            steps=[
+                ('scaler',MinMaxScaler() if scaling=='MinMax' else StandardScaler()),
+                ('PCA',PCA(n_components=k_features,svd_solver='full')),
+            ],
+            verbose=True
+        )
+        xtrain=pipe.fit_transform(xtrain,ytrain)
+        xtest=pipe.fit_transform(xtest,ytest)
+        return xtrain,xtest
+    
+    @staticmethod
+    def loader():
+        data=pd.read_csv(os.path.join('','results','PCASelector_pareto_optimal_objects.csv'),header=[0])
+        return data.iloc[0].to_list()
 
 def pareto(fselector):
     subfolder=None
@@ -260,28 +303,6 @@ def pareto(fselector):
 
     with open(os.path.join('','results',f'{subfolder}_pareto_optimal_objects.tex'),'w') as writer:
         writer.write(tabulate(rows,headers=column_names,tablefmt='latex'))
-
-def  best_params(fselector='gs'):
-    subfolder=None
-    metrics=[]
-    if fselector=='gs':
-        subfolder='GeneticSelector'
-        metrics=[
-            'Accuracy Score',
-            'F1 Score'
-        ]
-    elif fselector=='lasso':
-        subfolder='LassoSelector'
-        metrics=[
-            'Mean Square Error',
-            'R2-Square'
-        ]
-    elif fselector=='pca':
-        subfolder='PCA'
-        metrics=[
-            'Accuracy Score',
-            'F1 Score'
-        ]
 
 
 def scenario1():
