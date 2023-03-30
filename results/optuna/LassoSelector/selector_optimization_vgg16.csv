@@ -1,4 +1,4 @@
-Model,Lower Bound,Upper Bound,Scaling method,Alpha,Mean Square Error,R2-Square
+Pretrained model,Lower Bound,Upper Bound,Scaling,Alpha,Features,Mean Square Error,Mean Square Error
 vgg16,0,10.csv,Standardization,18.0,0,0.702494341265709,-1.4519618174446691e-08
 vgg16,0,10.csv,MinMax,13.0,0,0.702494341265709,-1.4519618174446691e-08
 vgg16,0,10.csv,KnnImpute,5.5,2,0.14828124282169985,0.7889217944339263

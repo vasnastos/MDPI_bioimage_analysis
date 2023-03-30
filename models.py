@@ -28,9 +28,10 @@ from feature_selection import LassoSelector
 from rich.console import Console
 from rich.table import Table
 from functools import reduce
-from elayers import AddLayer
+from elayers import AddLayer,OptunaParamLayer
 
-from feature_selection import LassoSelector,GeneticSelector,RFESelector
+from feature_selection import LassoSelector,GeneticSelector,PCASelector
+
 
 class Controller:
     freezing_layers = {
@@ -41,10 +42,10 @@ class Controller:
     }
 
     estimators={
-                'dt': DecisionTreeClassifier(max_depth=8,random_state=1234),
-                'rf': RandomForestClassifier(n_estimators=100,random_state=1234,max_depth=8),
-                'adaboost': AdaBoostClassifier(learning_rate=1e-5),
-                'knn':KNeighborsClassifier(n_neighbors=10,p=2)
+        'dt': DecisionTreeClassifier(max_depth=8,random_state=1234),
+        'rf': RandomForestClassifier(n_estimators=100,random_state=1234,max_depth=8),
+        'adaboost': AdaBoostClassifier(learning_rate=1e-5),
+        'knn':KNeighborsClassifier(n_neighbors=10,p=2)
     }
 
     classifiers = ['naive_bayes','svm','rf','knn','adaboost']
@@ -84,13 +85,10 @@ class ImageNet:
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
         sh = logging.StreamHandler()
-        fh = logging.FileHandler(filename=os.path.join('','project_results',''))
         formatter=logging.Formatter('%(asctime)s\t%(message)s')
         sh.setFormatter(formatter)
-        fh.setFormatter(formatter)
         self.log=logging.getLogger(name=f'rcc_staging_logger')
         self.log.addHandler(sh)
-        self.log.addHandler(fh)
         self.console=Console(record=True)
     
     def clear_session(self):
@@ -98,9 +96,6 @@ class ImageNet:
         ops.reset_default_graph()
         tf.keras.backend.clear_session()
         del self.model
-
-    def plot_random_samples(self):
-        plt.figure(figsize=(12,10))
 
     # Feature extraction function
     def extract_features(self, base_model_name, lb=0, ub=0, save=False):
@@ -190,6 +185,9 @@ class ImageNet:
         print(self.model.summary())
     
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
+        self.clear_session()
+        del self.model
+
         base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
         base_model.trainable = True
         if selective_fine_tuning[0]:
@@ -202,26 +200,17 @@ class ImageNet:
         self.model.add(base_model)
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
         self.model.add(tf.keras.layers.Dense(units=self.dataset.num_classes,activation='softmax',name='activation_layer'))
-        self.model.compile(ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy', metrics=['accuracy', tfa.metrics.CohenKappa(num_classes=self.dataset.num_classes,sparse_labels=True), tfa.metrics.F1Score(num_classes=self.dataset.num_classes, average='macro')])
-
-        self.model.save(os.path.join('..','fine_tuned_models',f'fined_tuned_{base_model_name}.h5'))
-
+        self.model.compile(optimizer=ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy', metrics=['accuracy', tfa.metrics.CohenKappa(num_classes=self.dataset.num_classes,sparse_labels=True), tfa.metrics.F1Score(num_classes=self.dataset.num_classes, average='macro')])
 
     def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada",**kwargs):
+        # To be fixed
         columns=None
         if feature_selection=="lasso":
-            selector=LassoSelector(xtrain,xtest,ytrain,ytest)
-            columns=selector.solve()
+            pass
         elif feature_selection=="genetic":
-            num_of_features=xtrain.shape[1]//2
-            if 'k_selected_features' in kwargs:
-                num_of_features=int(kwargs['k_selected_features'])
-                selector=GeneticSelector(xtrain,xtest,ytrain,ytest)
+            pass
         elif feature_selection=='pca':
-            num_of_features=xtrain.shape[1]//2
-            if 'k_selected_features' in kwargs:
-                num_of_features=int(kwargs['k_selected_features'])
-                selector=PCASelector(xtrain,xtest,ytrain,ytest)
+            pass
 
         # 3. classification model
         del self.model
@@ -353,6 +342,17 @@ class ImageNet:
             self.console(f'[bold red]:right arrow: [bold green]Cohens Kappa:{ck}')
             print(end='\n\n')
     
+    def optuna_callback2(self,trial):
+        pretrained_model_name=trial.suggest_categorical('pretrained_models',Controller.freezing_layers.keys())
+        freezing_layers_upper_bound=trial.suggest_categorical('upper_bound',Controller.freezing_layers[pretrained_model_name])
+        optimizer_name=trial.suggest_categorical('optimizers',['adam','sgd'])
+
+        self.premade_model(base_model_name=pretrained_model_name,optimizer_name=optimizer_name,selective_fine_tuning=(True,0,int(freezing_layers_upper_bound)))
+        self.fit(OptunaParamLayer.xtrain,OptunaParamLayer.ytrain)
+        acc,f1=accuracy_score(np.array(OptunaParamLayer.ytest),np.array(self.predict(OptunaParamLayer.xtest)))
+        OptunaParamLayer.add(config=(pretrained_model_name,freezing_layers_upper_bound,optimizer_name),evaluation=(acc,f1))
+        return acc,f1
+
     def fit(self,xtrain,ytrain):
         self.log.debug(self.model)
         if not hasattr(self.model,"fit"):
@@ -362,6 +362,7 @@ class ImageNet:
             self.model.fit(
                 xtrain,
                 ytrain,
+                epochs=50,
                 callbacks=ImageNet.callbacks(self.pretrained_model_name),
                 batch_size=Dataset.batch_size,
                 steps_per_epoch=xtrain.shape[0]//Dataset.batch_size,
