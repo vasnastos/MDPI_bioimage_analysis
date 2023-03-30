@@ -21,7 +21,7 @@ from collections import defaultdict
 
 import tensorflow as tf
 import tensorflow_addons as tfa
-import pickle,statistics,optuna
+import statistics
 
 from dataset import Dataset
 from feature_selection import LassoSelector
@@ -70,6 +70,12 @@ class ImageNet:
     def optimizer(opt_name):
         return tf.keras.optimizers.Adam(learning_rate=1e-5) if opt_name=='adam' else tf.keras.optimizers.SGD(learning_rate=1e-5) if opt_name=='sgd' else tf.keras.optimizers.RMSprop(learning_rate=1e-5) if opt_name=='rmsprop' else tf.keras.optimizers.Adagrad(learning_rate=1e-5)  
 
+    @staticmethod
+    def callbacks(model_name): 
+        return [
+            tf.keras.callbacks.EarlyStopping(monitor='loss', mode='min', patience=4, min_delta=1e-3, restore_best_weights=True),
+            tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join('','trained_models',f'{model_name}_selective_fine_tuning.h5'), monitor='loss', mode='min', save_best_only=True, verbose=True)
+        ]
     
     def __init__(self):
         self.dataset=Dataset()
@@ -186,7 +192,6 @@ class ImageNet:
     
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
         self.clear_session()
-        del self.model
 
         base_model,self.pretrained_model_name=(tf.keras.applications.VGG16(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG16') if base_model_name=='vgg16' else (tf.keras.applications.VGG19(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'VGG19') if base_model_name=='vgg19' else (tf.keras.applications.ResNet50V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET50') if base_model_name=='resnet50' else (tf.keras.applications.ResNet101V2(weights='imagenet', input_shape=Dataset.image_size, include_top=False),'RESNET101')
         base_model.trainable = True
@@ -200,7 +205,8 @@ class ImageNet:
         self.model.add(base_model)
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
         self.model.add(tf.keras.layers.Dense(units=self.dataset.num_classes,activation='softmax',name='activation_layer'))
-        self.model.compile(optimizer=ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy', metrics=['accuracy', tfa.metrics.CohenKappa(num_classes=self.dataset.num_classes,sparse_labels=True), tfa.metrics.F1Score(num_classes=self.dataset.num_classes, average='macro')])
+        self.model.compile(optimizer=ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+        print(self.model.summary())
 
     def conventional_model(self,xtrain,xtest,ytrain,ytest,feature_selection="lasso",clf="ada",**kwargs):
         # To be fixed
@@ -346,22 +352,39 @@ class ImageNet:
         pretrained_model_name=trial.suggest_categorical('pretrained_models',Controller.freezing_layers.keys())
         freezing_layers_upper_bound=trial.suggest_categorical('upper_bound',Controller.freezing_layers[pretrained_model_name])
         optimizer_name=trial.suggest_categorical('optimizers',['adam','sgd'])
+        Xentry,Yentry=self.dataset.load_image_dataset(split=False)
+        Xentry=np.asarray(Xentry)
+        Yentry=np.asarray(Yentry)
 
-        self.premade_model(base_model_name=pretrained_model_name,optimizer_name=optimizer_name,selective_fine_tuning=(True,0,int(freezing_layers_upper_bound)))
-        self.fit(OptunaParamLayer.xtrain,OptunaParamLayer.ytrain)
-        acc,f1=accuracy_score(np.array(OptunaParamLayer.ytest),np.array(self.predict(OptunaParamLayer.xtest)))
-        OptunaParamLayer.add(config=(pretrained_model_name,freezing_layers_upper_bound,optimizer_name),evaluation=(acc,f1))
-        return acc,f1
+        cv_model=StratifiedKFold(n_splits=5)
+        maccuracy=list()
+        mf1=list()
+
+        for train_idx,test_idx in cv_model.split(Xentry,Yentry):
+            xtrain=Xentry[train_idx]
+            xtest=Xentry[test_idx]
+            ytrain=Yentry[train_idx]
+            ytest=Yentry[test_idx]
+            self.premade_model(base_model_name=pretrained_model_name,optimizer_name=optimizer_name,selective_fine_tuning=(True,0,int(freezing_layers_upper_bound)))
+            self.fit(xtrain,ytrain)
+            ypreds=np.array(self.predict(xtest))
+            acc,f1=accuracy_score(ytest,ypreds)
+            maccuracy.append(acc)
+            mf1.append(f1)
+            
+            OptunaParamLayer.add(config=(pretrained_model_name,freezing_layers_upper_bound,optimizer_name),evaluation=(acc,f1))
+        
+        return statistics.mean(maccuracy),statistics.mean(mf1)
 
     def fit(self,xtrain,ytrain):
-        self.log.debug(self.model)
         if not hasattr(self.model,"fit"):
             raise AttributeError(f"No method fit found in {type(self.model)}")
         
         if type(self.model)==tf.keras.Sequential:
+
             self.model.fit(
-                xtrain,
-                ytrain,
+                tf.convert_to_tensor(xtrain),
+                tf.convert_to_tensor(ytrain),
                 epochs=50,
                 callbacks=ImageNet.callbacks(self.pretrained_model_name),
                 batch_size=Dataset.batch_size,
@@ -404,54 +427,3 @@ class ImageNet:
 
         self.console.rule('[bold red]Biomadical images dataset descriptive analytics')
         self.console.print(stats_table)
-
-class OptunaModel:
-    study_case_results_path=os.path.join('','optuna')
-    study_results=dict()
-
-    @staticmethod
-    def flush():
-        OptunaModel.results.clear()
-
-    @staticmethod
-    def add_result(combination,metric_name,metric_value):
-        if OptunaModel.study_results.get(combination,None)==None:
-            OptunaModel[combination]=dict()
-        OptunaModel[combination][metric_name]=metric_value
-
-    def __init__(self,new_study_case):
-        self.study_id=new_study_case
-        self.study = None
-        self.trial = None
-        self.study_objective_dimensions=list()
-
-    def add_objective_dimension(self,param_name,direction):
-        self.study_objective_dimensions.append((param_name,direction))
-    
-    def set_callback(self,callback_function):
-        del self.study
-        del self.trial
-        if self.study_objective_dimensions==[]:
-            raise AttributeError("No objective dimension has been setted properly")
-
-        self.study=optuna.create_study(directions=[direction for _,direction in self.study_objective_dimensions],load_if_exists=True)
-        self.study.optimize(callback_function,n_trials=50)
-    
-    def export(self):
-        self.study.save_study_direction()
-        self.study.trials_dataframe().to_csv(os.path.join(OptunaModel.study_case_results_path,f'{self.study_id}.csv'))
-
-    def export_best(self):
-        if not os.path.exists(os.path.join(OptunaModel.study_case_results_path,self.study_id)):
-            os.mkdir(os.path.join(OptunaModel.study_case_results_path,self.study_id))
-        
-        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_trial.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_trial, f)
-
-        # save the best parameters
-        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_params.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_params, f)
-
-        # save the best value of the objective function
-        with open(os.path.join(OptunaModel.study_case_results_path,self.study_id,'best_value.pkl'), 'wb') as f:
-            pickle.dump(self.study.best_value, f)
