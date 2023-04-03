@@ -1,4 +1,4 @@
-import os,numpy as np,psutil,seaborn as sns,logging,cv2,pandas as pd
+import os,numpy as np,psutil,seaborn as sns,logging,pandas as pd
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import Lasso
