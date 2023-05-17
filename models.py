@@ -29,26 +29,7 @@ from rich.console import Console
 from rich.table import Table
 from functools import reduce
 from elayers import AddLayer,OptunaParamLayer
-
 from feature_selection import LassoSelector,GeneticSelector,PCASelector
-
-
-class Controller:
-    freezing_layers = {
-        'vgg16': [6,10,14],
-        'vgg19': [6,11,16],
-        'resnet50': [39,85,153],
-        'resnet101': [39,85,340]
-    }
-
-    estimators={
-        'dt': DecisionTreeClassifier(max_depth=8,random_state=1234),
-        'rf': RandomForestClassifier(n_estimators=100,random_state=1234,max_depth=8),
-        'adaboost': AdaBoostClassifier(learning_rate=1e-5),
-        'knn':KNeighborsClassifier(n_neighbors=10,p=2)
-    }
-
-    classifiers = ['naive_bayes','svm','rf','knn','adaboost']
 
 class ImageNet:
     path_to_furhman1 = os.path.join('..','dataset','40x','Fuhrman 1')
@@ -81,11 +62,35 @@ class ImageNet:
         self.dataset=Dataset()
         self.model=None
         self.pretrained_model_name=''
+        self.images,self.labels=None,None
         self.bioimage_dataframe=None
-        self.selector=None
-        self.params=list()
-        self.bioimage_input, self.bioimage_label = self.dataset.load_image_dataset(split=False)
         self.console=Console(record=True)
+
+        # set some custom parameters
+        self.freezing_layers= {
+            'vgg16': [6,10,14],
+            'vgg19': [6,11,16],
+            'resnet50': [39,85,153],
+            'resnet101': [39,85,340]
+        }
+
+        self.classifiers=[
+            'dt',
+            'rf',
+            'adaboost',
+            'knn'
+        ]
+
+    def load(self,dit_biopsies=True):
+        if dit_biopsies:
+            self.images,self.labels=self.dataset.load_image_dataset(split=False)
+
+    def feature_target_pair(self):
+        feature_names=self.bioimage_dataframe.columns.to_list()
+        target_name=feature_names[-1]
+        feature_names.remove(target_name)
+
+        return feature_names,target_name
     
     def clear_session(self):
         from tensorflow.python.framework import ops
@@ -97,16 +102,15 @@ class ImageNet:
     def extract_features(self, base_model_name, lb=0, ub=0, save=False):
         self.pretrained_model_name = base_model_name
         self.feature_extraction_model(base_model_name, lb, ub)
-        self.console.print(f'[bold green] {self.model.summary()}')
 
         feature_set = list()
-        labels = list()
-        for i in range(0, self.bioimage_input.shape[0] // Dataset.batch_size):
+        labels_set = list()
+        for i in range(0, self.images.shape[0] // Dataset.batch_size):
             batch_indeces = list(range(i, i + Dataset.batch_size))
             batch_images = []
 
             for image_index in batch_indeces:
-                image = np.array(self.bioimage_input[image_index])
+                image = np.array(self.images[image_index])
                 image = np.expand_dims(image, axis=0)
                 image = tf.keras.applications.imagenet_utils.preprocess_input(image)
                 batch_images.append(image)
@@ -117,11 +121,11 @@ class ImageNet:
             flatten_shape = reduce(lambda a, b: a * b, [x for x in list(output_shape) if type(x) == int])
             features = np.reshape(features, (-1, flatten_shape))
             feature_set.append(features)
-            labels.append(np.array(self.bioimage_label[i:i + Dataset.batch_size]))
+            labels_set.append(np.array(self.labels[i:i + Dataset.batch_size]))
 
         # Convert features and labels to arrays
         feature_set = np.vstack(feature_set)
-        labels = np.hstack(labels)
+        labels_set = np.hstack(labels_set)
 
         # Save extracted features and labels to CSV file
         data=list()
@@ -136,15 +140,15 @@ class ImageNet:
                     for j in range(feature_set.shape[1]):
                         row.append(feature_set[i][j])
                         writer.write(f'{feature_set[i][j]},')
-                    writer.write(f'{labels[i]}\n')
-                    row.append(labels[i])
+                    writer.write(f'{labels_set[i]}\n')
+                    row.append(labels_set[i])
                     data.append(row)
         else:
             for i in range(feature_set.shape[0]):
                 row=list()
                 for j in range(feature_set.shape[1]):
                     row.append(feature_set[i][j])
-                row.append(labels[i])
+                row.append(labels_set[i])
                 data.append(row)
         self.bioimage_dataframe=pd.DataFrame(data,columns=[f'F{i+1}' for i in range(len(feature_set[0]))]+['Fuhrman'])
 
@@ -180,22 +184,6 @@ class ImageNet:
         self.model.add(tf.keras.layers.GlobalAveragePooling2D(name='average_pooling_layer'))
         print(self.model.summary())
     
-    def preprocessing(self,feature_selection='gs'):
-        if feature_selection=='gs':
-            configurations=GeneticSelector.loader()
-            self.params={"scaling":configurations[4],"features":configurations[5]}
-            self.selector='gs'
-        elif feature_selection=='lasso':
-            configurations=LassoSelector.loader()
-            self.params={"scaling":configurations[4],"alpha":configurations[5],"features":configurations[6]}
-            self.selector='lasso'
-        elif feature_selection=='pca':
-            configurations=PCASelector.loader()
-            self.params={"scaling":configurations[4],"features":configurations[5]}
-            self.selector='pca'
-        
-        self.extract_features(base_model_name=configurations[1], lb=configurations[2],ub=configurations[3],save=False)
-    
     def premade_model(self,base_model_name='vgg16',optimizer_name='adam',selective_fine_tuning=(None,-1,-1)):
         self.clear_session()
 
@@ -216,13 +204,12 @@ class ImageNet:
 
     def conventional_model(self,xtrain,xtest,ytrain,ytest,clf="ada",**kwargs):
         # 1. Load config and feature selection
-        # if self.selector=='gs':
-        #     GeneticSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
-        # elif self.selector=='lasso':
-        #     LassoSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'],alpha=self.params['alpha'])
-        # elif self.selector=='pca':
-        print('Params:',self.params)
-        PCASelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
+        if self.selector=='gs':
+             GeneticSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
+        elif self.selector=='lasso':
+             LassoSelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'],alpha=self.params['alpha'])
+        elif self.selector=='pca':
+            PCASelector.fit_transform(xtrain,xtest,ytrain,ytest,k_features=self.params['features'],scaling=self.params['scaling'])
 
         # 2. classification model
         if clf=='all':
@@ -246,23 +233,6 @@ class ImageNet:
             self.model = AdaBoostClassifier(learning_rate=1e-5)
         
         self.model=self.model.fit(xtrain,ytrain)
-    
-    def voting_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",voting='soft'):
-        del self.model
-        voting_clf = VotingClassifier(
-            estimators = [
-                KNeighborsClassifier(n_neighbors=10),
-                DecisionTreeClassifier(max_depth=8,class_weight='balanced'),
-                SVC(kernel='rbf',decision_function_shape='ovo',break_ties=True),
-                RandomForestClassifier(max_depth=8,n_estimators=50,verbose=True),                
-                AdaBoostClassifier(n_estimators=50,learning_rate=1e-2)                
-            ],
-            voting = voting,
-            flatten_transform = False,
-            verbose = True,
-            n_jobs=-1
-        )
-        self.model = voting_clf.fit(xtrain,ytrain)
     
     def custom_model(self,optimizer_name):
         self.clear_session()
@@ -295,25 +265,40 @@ class ImageNet:
         )
         self.model.compile(ImageNet.optimizer(optimizer_name),loss='sparse_categorical_crossentropy',metrics=['accuracy', tfa.metrics.CohenKappa(num_classes=self.dataset.num_classes,sparse_labels=True), tfa.metrics.F1Score(num_classes=self.dataset.num_classes, average='micro')])
 
+    def voting_model(self,xtrain,xtest,ytrain,scaling="MinMax",feature_selection="lasso",voting='soft'):
+        del self.model
+        voting_clf = VotingClassifier(
+            estimators = [
+                KNeighborsClassifier(n_neighbors=10),
+                DecisionTreeClassifier(max_depth=8,class_weight='balanced'),
+                SVC(kernel='rbf',decision_function_shape='ovo',break_ties=True),
+                RandomForestClassifier(max_depth=8,n_estimators=50,verbose=True),                
+                AdaBoostClassifier(n_estimators=50,learning_rate=1e-2)                
+            ],
+            voting = voting,
+            flatten_transform = False,
+            verbose = True,
+            n_jobs=-1
+        )
+        self.model = voting_clf.fit(xtrain,ytrain)
+
+
     # Optuna callback 
     def optuna_callback(self,trial):
         selective_fine_tuning_base_model = trial.suggest_categorical('selective_fine_tuning_base_model',['vgg16','vgg19','resnet50','resnet101'])
         selective_fine_tuning_ub = trial.suggest_categorical('selective fine tuning',['0','1','2'])
         scaling = trial.suggest_categorical('scaling',['MinMax','Standardization','KnnImputer'])
-        classifier = trial.suggest_categorical('classifier',Controller.classifiers)
+        classifier = trial.suggest_categorical('classifier',self.classifiers)
         if classifier=='vt':
             voting_system=trial.suggest_categorical('voting',['soft','hard'])
         self.clear_session()
 
         self.extract_features(selective_fine_tuning_base_model,ub=selective_fine_tuning_ub,save=False)
 
-        feature_names=self.bioimage_dataframe.columns.to_list()
-        target_name=feature_names[-1]
-        feature_names.remove(target_name)
-
+        feature_names,target_name=self.feature_target_pair()
         feature_map,label_map=self.bioimage_dataframe[feature_names],self.bioimage_dataframe[target_name]
         scores = dict(accuracy=list(),recall=list(),precision=list(),f1_score=list(),cohens_kappa=list())
-        cv_model = StratifiedKFold(n_splits=10,random_state=1234,shuffle=True)
+        cv_model = StratifiedKFold(n_splits=10,shuffle=False)
         for train_indeces,test_indeces in cv_model.split(feature_map,label_map):
             xtrain = pd.DataFrame(data=[feature_map.iloc[i].tolist() for i in train_indeces],columns=feature_map.columns)
             xtest = pd.DataFrame(data=[feature_map.iloc[i].tolist() for i in test_indeces],columns=feature_map.columns)
@@ -340,10 +325,11 @@ class ImageNet:
             self.console(f'[bold red]:right arrow: [bold green]F1 Score:{f1score}')
             self.console(f'[bold red]:right arrow: [bold green]Cohens Kappa:{ck}')
             print(end='\n\n')
+
     
     def optuna_callback2(self,trial):
-        pretrained_model_name=trial.suggest_categorical('pretrained_models',Controller.freezing_layers.keys())
-        freezing_layers_upper_bound=trial.suggest_categorical('upper_bound',Controller.freezing_layers[pretrained_model_name])
+        pretrained_model_name=trial.suggest_categorical('pretrained_models',self.freezing_layers.keys())
+        freezing_layers_upper_bound=trial.suggest_categorical('upper_bound',self.freezing_layers[pretrained_model_name])
         optimizer_name=trial.suggest_categorical('optimizers',['adam','sgd'])
         Xentry,Yentry=self.dataset.load_image_dataset(split=False)
         Xentry=np.asarray(Xentry)
@@ -401,6 +387,7 @@ class ImageNet:
         plt.xticks([]), plt.yticks([])
         plt.show()
 
+    # Statistics table
     def statistics(self):
         stats_table=Table(headers=['','Mean','Median','Std','IQR','Skewness','Kurtosis','Entropy'],header_style='bold')
         feature_stats=defaultdict(dict)
